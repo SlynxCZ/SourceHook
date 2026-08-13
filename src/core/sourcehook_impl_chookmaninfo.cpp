@@ -9,7 +9,7 @@
 * ============================
 */
 
-#include "sourcehook/sourcehook_impl.h"
+#include "../../include/sourcehook/sourcehook_impl.h"
 
 namespace SourceHook
 {

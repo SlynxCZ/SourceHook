@@ -14,8 +14,8 @@
 #include <list>
 #include <memory>
 
-#include "sourcehook/sourcehook_impl_cproto.h"
-#include "sourcehook/sh_pagealloc.h"
+#include "../../include/sourcehook/sourcehook_impl_cproto.h"
+#include "../../include/sourcehook/sh_pagealloc.h"
 #include "sh_asm.h"
 
 namespace SourceHook

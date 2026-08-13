@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include "sourcehook/sh_pagealloc.h"
+#include "../../include/sourcehook/sh_pagealloc.h"
 
 namespace SourceHook
 {
