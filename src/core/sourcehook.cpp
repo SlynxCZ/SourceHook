@@ -166,10 +166,20 @@ namespace SourceHook
 
 				);
 
-			if (post)
-				ifaceinst.GetPostHookList().push_back(hook);
-			else
-				ifaceinst.GetPreHookList().push_back(hook);
+			// Exclusive lock: excludes a concurrent dispatch (SetupHookLoop
+			// through EndContext, on another thread, holding this same
+			// CIface's lock shared -- see SetupHookLoop's comment) from
+			// iterating this list while it's being resized/relinked.
+			// CMaybeExclusiveLock, not a raw unique_lock: this same call can
+			// legitimately happen reentrantly, from inside a handler that's
+			// itself currently being dispatched through this exact iface.
+			{
+				CMaybeExclusiveLock lock(ifaceinst.GetHookListMutex());
+				if (post)
+					ifaceinst.GetPostHookList().push_back(hook);
+				else
+					ifaceinst.GetPreHookList().push_back(hook);
+			}
 
 			return hook.GetID();
 		}
@@ -230,41 +240,50 @@ namespace SourceHook
 
 			hook_iter->GetHandler()->DeleteThis();
 
-			// Iterator movage!
+			// Iterator movage! CMaybeExclusiveLock (not a raw unique_lock --
+			// see its comment): RemoveHookByID() can legitimately be called
+			// reentrantly, e.g. a Post handler unhooking itself. Excludes a
+			// concurrent dispatch (SetupHookLoop..EndContext, on another
+			// thread, holding this same CIface's lock shared) from iterating
+			// this exact list while it's erased from.
 			List<CHook>::iterator oldhookiter = hook_iter;
-			hook_iter = hooks.erase(hook_iter);
+			{
+				CMaybeExclusiveLock lock(iface_iter->GetHookListMutex());
+				hook_iter = hooks.erase(hook_iter);
+			}
 
-			for (CStack<CHookContext>::iterator ctx_iter = m_ContextStack.begin();
-				ctx_iter != m_ContextStack.end(); ++ctx_iter)
+			for (CStack<CHookContext>::iterator ctx_iter = ContextStack().begin();
+				ctx_iter != ContextStack().end(); ++ctx_iter)
 			{
 				ctx_iter->HookRemoved(oldhookiter, hook_iter);
 			}
 
-			if (iface_iter->GetPreHookList().empty() && iface_iter->GetPostHookList().empty())
-			{
-				// -> Kill all contexts that use it!
-				for (CStack<CHookContext>::iterator ctx_iter = m_ContextStack.begin();
-					ctx_iter != m_ContextStack.end(); ++ctx_iter)
-				{
-					ctx_iter->IfaceRemoved(&(*iface_iter));
-				}
-
-				// There are no hooks on this iface anymore...
-				iface_iter = vfnptr_iter->GetIfaceList().erase(iface_iter);
-
-				if (vfnptr_iter->GetIfaceList().empty())
-				{
-					// No ifaces at all -> Deactivate the hook
-
-					for (CStack<CHookContext>::iterator ctx_iter = m_ContextStack.begin();
-						ctx_iter != m_ContextStack.end(); ++ctx_iter)
-					{
-						ctx_iter->VfnPtrRemoved(&(*vfnptr_iter));
-					}
-
-					RevertAndRemoveVfnPtr(vfnptr_iter);
-				}
-			}
+			// Deliberately NOT erasing iface_iter (or cascading into
+			// RevertAndRemoveVfnPtr) just because both hook lists are empty
+			// now -- CIface is never actually destroyed once created for
+			// exactly this reason; see its GetHookListMutex() comment
+			// (sourcehook_impl_ciface.h) for why "delete once empty" and
+			// "safe to dispatch through concurrently" are fundamentally at
+			// odds. An empty CIface is already a harmless no-op passthrough
+			// (SetupHookLoop resolves it, GetNext() finds nothing to
+			// iterate, the original just gets called) -- functionally
+			// equivalent to "fully unhooked" from a caller's point of view,
+			// same as CInlineDispatcher's empty-but-installed state.
+			//
+			// RemoveHookManager() (this file, further down) still has its
+			// OWN, separate path to RevertAndRemoveVfnPtr() -- reached when a
+			// plugin's *hook manager* (not just one hook) goes away entirely,
+			// independent of any particular iface's hook-list emptiness.
+			// That path physically reverts the vtable-slot patch and deletes
+			// the CVfnPtr, and has the exact same "is anything mid-dispatch
+			// through it right now" hazard this pass closes for CIface --
+			// it is NOT yet closed for CVfnPtr/RevertAndRemoveVfnPtr. In
+			// practice this only matters if a plugin actually unhooks (not
+			// just pauses) the *last* hook of a given signature on a vtable
+			// slot while some other thread might still be mid-call through
+			// it; a hook that's simply always installed for the plugin's
+			// whole lifetime (e.g. the SendNetMessage case this pass exists
+			// for) never exercises this path at all.
 
 			m_HookIDMan.Remove(hookid);
 			return true;
@@ -286,16 +305,16 @@ namespace SourceHook
 				// If this vfnptr is in use in one of the hook loops running at the moment
 				// Schedule it for removal on the DEEPEST hook loop.
 
-				size_t numOfContexts = m_ContextStack.size();
-				// m_ContextStack.at(0) is the deepest hook context
-				// m_ContextStack.at(size-1) = m_ContextStack.front is the uppermost
+				size_t numOfContexts = ContextStack().size();
+				// ContextStack().at(0) is the deepest hook context
+				// ContextStack().at(size-1) = ContextStack().front is the uppermost
 
 				bool cleanupImmedieately = true;
 
 				CVfnPtr *vfnPtrObjAddr = &(*vfnptr_iter);
 				for (size_t i = 0; i < numOfContexts; ++i)
 				{
-					CHookContext &context = m_ContextStack.at(i);
+					CHookContext &context = ContextStack().at(i);
 					if (context.pVfnPtr == vfnPtrObjAddr)
 					{
 						// Found a hook context using this vfnptr at the moment.
@@ -318,48 +337,48 @@ namespace SourceHook
 
 		void CSourceHookImpl::SetRes(META_RES res)
 		{
-			*m_ContextStack.front().pCurRes = res;
+			*ContextStack().front().pCurRes = res;
 		}
 
 		META_RES CSourceHookImpl::GetPrevRes()
 		{
-			return *m_ContextStack.front().pPrevRes;
+			return *ContextStack().front().pPrevRes;
 		}
 
 		META_RES CSourceHookImpl::GetStatus()
 		{
-			return *m_ContextStack.front().pStatus;
+			return *ContextStack().front().pStatus;
 
 		}
 
 		const void *CSourceHookImpl::GetOrigRet()
 		{
-			return m_ContextStack.front().pOrigRet;
+			return ContextStack().front().pOrigRet;
 		}
 
 		const void *CSourceHookImpl::GetOverrideRet()
 		{
-			return (*m_ContextStack.front().pStatus < MRES_OVERRIDE) ?
-				NULL : m_ContextStack.front().pOverrideRet;
+			return (*ContextStack().front().pStatus < MRES_OVERRIDE) ?
+				NULL : ContextStack().front().pOverrideRet;
 		}
 
 		void *CSourceHookImpl::GetIfacePtr()
 		{
 			// If in recall: return last one
-			if (m_ContextStack.front().m_State >= CHookContext::State_Recall_Pre &&
-				m_ContextStack.front().m_State <= CHookContext::State_Recall_PostVP)
+			if (ContextStack().front().m_State >= CHookContext::State_Recall_Pre &&
+				ContextStack().front().m_State <= CHookContext::State_Recall_PostVP)
 			{
-				return m_ContextStack.second().pIfacePtr;
+				return ContextStack().second().pIfacePtr;
 			}
 			else
 			{
-				return m_ContextStack.front().pIfacePtr;
+				return ContextStack().front().pIfacePtr;
 			}
 		}
 
 		void *CSourceHookImpl::GetOverrideRetPtr()
 		{
-			return m_ContextStack.front().pOverrideRet;
+			return ContextStack().front().pOverrideRet;
 		}
 
 		void CSourceHookImpl::UnloadPlugin(Plugin plug, UnloadListener *listener)
@@ -386,7 +405,7 @@ namespace SourceHook
 			// free them as the context stack drops to 0, or we could change the pubfunc API to
 			// know whether it's active or not. Rather than deal with this extra complexity, we
 			// just conservatively wait until the context stack hits 0 before unloading.
-			if (m_ContextStack.size() == 0)
+			if (ContextStack().size() == 0)
 			{
 				listener->ReadyToUnload(plug);
 			}
@@ -435,17 +454,17 @@ namespace SourceHook
 		{
 			CHookContext ctx;
 			ctx.m_State = CHookContext::State_Ignore;
-			m_ContextStack.push(ctx);
+			ContextStack().push(ctx);
 		}
 
 		void CSourceHookImpl::ResetIgnoreHooks(void *vfnptr)
 		{
-			if (!m_ContextStack.empty() && m_ContextStack.front().m_State == CHookContext::State_Ignore)
+			if (!ContextStack().empty() && ContextStack().front().m_State == CHookContext::State_Ignore)
 			{
 				// Actually use EndContext
-				// instead of m_ContextStack.pop directly
+				// instead of ContextStack().pop directly
 				// because it runs the cleanup task if neccesary
-				EndContext(&(m_ContextStack.front()));
+				EndContext(&(ContextStack().front()));
 			}
 		}
 
@@ -462,7 +481,7 @@ namespace SourceHook
 		void CSourceHookImpl::DoRecall()
 		{
 			CHookContext newCtx;
-			CHookContext &curCtx = m_ContextStack.front();
+			CHookContext &curCtx = ContextStack().front();
 
 
 			newCtx.m_State = curCtx.m_State + (CHookContext::State_Recall_Pre - CHookContext::State_Pre);
@@ -485,7 +504,7 @@ namespace SourceHook
 			// Take this with us!
 			newCtx.pCurRes = curCtx.pCurRes;
 
-			m_ContextStack.push(newCtx);
+			ContextStack().push(newCtx);
 			curCtx.m_State = CHookContext::State_Dead;
 		}
 
@@ -505,7 +524,7 @@ namespace SourceHook
 			(void*)this, (void*)hi, (void*)vfnptr, (void*)thisptr, (void*)origCallAddr, (void*)statusPtr, (void*)prevResPtr, (void*)curResPtr, (void*)origRetPtr, (void*)overrideRetPtr);
 
 			CHookContext *pCtx = NULL;
-			CHookContext *oldctx = m_ContextStack.empty() ? NULL : &m_ContextStack.front();
+			CHookContext *oldctx = ContextStack().empty() ? NULL : &ContextStack().front();
 			if (oldctx)
 			{
 				// SH_CALL
@@ -566,15 +585,33 @@ namespace SourceHook
 			}
 			if (!pCtx)
 			{
-				pCtx = m_ContextStack.make_next();
+				pCtx = ContextStack().make_next();
 				pCtx->m_State = CHookContext::State_Born;
 				pCtx->m_CallOrig = true;
+
+				// This is the one point that acquires GetHookListMutex() --
+				// held (shared, reentrant-safe across a same-thread nested
+				// dispatch into the same iface) for this context's entire
+				// lifetime, all the way through the matching EndContext()
+				// call below: the resolved pIface's GetPreHookList()/
+				// GetPostHookList() get iterated live (CHookContext::
+				// GetNext(), further down in this file) at every step in
+				// between (Pre loop, the original call, Post loop), same as
+				// upstream's original single-threaded design -- this is what
+				// makes that safe against a concurrent AddHook()/
+				// RemoveHookByID() mutating the same lists from another
+				// thread. The Ignore(SH_CALL)/Recall reuse branches above
+				// return/fall through *without* reaching this block at all
+				// (pCtx is non-null already), because they're continuing a
+				// call that's already inside its own locked window -- see
+				// CHookContext::m_LockedIface's comment.
+				pCtx->m_LockedIface = NULL;
 			}
 
 			pCtx->pIface = NULL;
 
 			List<CVfnPtr*> &vfnptr_list = static_cast<CHookManager*>(hi)->GetVfnPtrList();
-			List<CVfnPtr*>::iterator vfnptr_iter; 
+			List<CVfnPtr*>::iterator vfnptr_iter;
 			for (vfnptr_iter = vfnptr_list.begin();
 				vfnptr_iter != vfnptr_list.end(); ++vfnptr_iter)
 			{
@@ -591,6 +628,12 @@ namespace SourceHook
 				pCtx->pVfnPtr = *vfnptr_iter;
 				*origCallAddr = pCtx->pVfnPtr->GetOrigCallAddr();
 				pCtx->pIface = pCtx->pVfnPtr->FindIface(thisptr);
+
+				if (pCtx->pIface && !pCtx->m_LockedIface)
+				{
+					CReentrantSharedLock::Acquire(pCtx->pIface->GetHookListMutex());
+					pCtx->m_LockedIface = pCtx->pIface;
+				}
 			}
 
 			pCtx->pStatus = statusPtr;
@@ -630,13 +673,25 @@ namespace SourceHook
 		void CSourceHookImpl::EndContext(IHookContext *pCtx)
 		{
 			// Do clean up task, if any is associated with this context
-			m_ContextStack.front().DoCleanupTaskAndDeleteIt();
+			ContextStack().front().DoCleanupTaskAndDeleteIt();
+
+			// Release the GetHookListMutex() shared lock SetupHookLoop()
+			// acquired for this context (fresh-context path only -- see its
+			// comment), if any. Must happen before the pop() below, which is
+			// what makes ContextStack().front() stop referring to this
+			// context at all.
+			if (CIface *lockedIface = ContextStack().front().m_LockedIface)
+			{
+				CReentrantSharedLock::Release(lockedIface->GetHookListMutex());
+				ContextStack().front().m_LockedIface = NULL;
+			}
+
 			// Then remove it
-			m_ContextStack.pop();
+			ContextStack().pop();
 
 			// If we've reached 0 contexts and there are pending unloads,
 			// resolve them now.
-			if (m_ContextStack.size() == 0 && m_PendingUnloads.size() != 0)
+			if (ContextStack().size() == 0 && m_PendingUnloads.size() != 0)
 				ResolvePendingUnloads();
 		}
 

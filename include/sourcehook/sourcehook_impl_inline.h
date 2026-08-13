@@ -54,8 +54,13 @@ namespace SourceHook
 			// surface loudly rather than silently double-detour.
 			bool Claim(void *addr, const std::type_info &sig);
 
-			// Called once a signature's dispatcher for `addr` has no more
-			// registered handlers and has torn down its safetyhook::InlineHook.
+			// Called when a claim needs to be undone -- currently only the
+			// "safetyhook::InlineHook::create() itself failed" path in
+			// CInlineDispatcher::GetOrCreate() (sourcehook_inline.h). A
+			// dispatcher's claim is otherwise permanent for the process'
+			// lifetime once installation succeeds: RemoveHook() never tears
+			// the detour down (see the comment there for why), so there is no
+			// "last handler removed" release anymore.
 			void Release(void *addr);
 
 			// Test/debug helper: how many distinct addresses are currently

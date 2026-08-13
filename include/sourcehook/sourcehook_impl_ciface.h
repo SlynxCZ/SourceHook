@@ -11,6 +11,9 @@
 #ifndef __SOURCEHOOK_IMPL_CIFACE_H__
 #define __SOURCEHOOK_IMPL_CIFACE_H__
 
+#include <memory>
+#include <shared_mutex>
+
 #include "sh_list.h"
 #include "sourcehook_impl_chook.h"
 
@@ -39,11 +42,47 @@ namespace SourceHook
 			inline List<CHook> &GetPostHookList();
 			inline const List<CHook> &GetPreHookList() const;
 			inline const List<CHook> &GetPostHookList() const;
+
+			// Guards m_PreHooks/m_PostHooks against a concurrent
+			// AddHook()/RemoveHookByID() (sourcehook.cpp) on one thread
+			// racing a hook-loop dispatch (SetupHookLoop..EndContext, which
+			// iterates these lists live, not a snapshot -- same shape as
+			// upstream's original single-threaded design) on another. The
+			// dispatching thread holds a *shared* lock for the entire
+			// SetupHookLoop..EndContext window (including any recall
+			// round-trip -- see CHookContext::m_LockedIface below); Add/
+			// RemoveHookByID take the *exclusive* lock only for the brief
+			// list mutation itself. This is also why CIface is never
+			// actually destroyed once created (see the comment on
+			// CSourceHookImpl::RemoveHookByID's "empty" branch in
+			// sourcehook.cpp) -- deleting an object out from under a thread
+			// that might still be blocked trying to lock its own mutex is
+			// undefined behavior no locking discipline alone can fix; not
+			// deleting it sidesteps the question entirely, same choice
+			// CInlineDispatcher (sourcehook_inline.h) already makes for
+			// inline hooks, and the same one KHook's own DetourCapsule
+			// makes for vtable hooks (see the code-reading writeup that
+			// motivated this whole pass).
+			//
+			// A shared_ptr, not a plain member: List<T>::push_back()
+			// copy-constructs into its node (CVfnPtr::GetIface() builds a
+			// throwaway local CIface and copies it in -- see
+			// sourcehook_impl_cvfnptr.cpp), so CIface has to stay
+			// copy-constructible; std::shared_mutex itself is neither
+			// copyable nor movable. The short-lived throwaway temporary and
+			// its one real copy inside the list briefly point at the same
+			// mutex object, which is harmless -- the temporary is discarded
+			// immediately after the copy, single-threaded within GetIface(),
+			// before anything else could possibly try to lock it.
+			inline std::shared_mutex &GetHookListMutex() const { return *m_HookListMutex; }
+
+		private:
+			std::shared_ptr<std::shared_mutex> m_HookListMutex;
 		};
 
 		// *** Implementation ***
 		inline CIface::CIface(void *ptr)
-			: m_Ptr(ptr)
+			: m_Ptr(ptr), m_HookListMutex(std::make_shared<std::shared_mutex>())
 		{
 		}
 

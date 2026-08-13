@@ -42,7 +42,8 @@ elseif(LINUX)
         main_inline.cpp
         testinlinehook.cpp
     )
-    target_link_libraries(test_sourcehook_inline PRIVATE sourcehook)
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_sourcehook_inline PRIVATE sourcehook Threads::Threads)
     sourcehook_apply_platform_flags(test_sourcehook_inline)
     add_test(NAME sourcehook_inline_tests COMMAND test_sourcehook_inline)
 else()

@@ -181,6 +181,8 @@ New SH_CALL
 #include "sourcehook_impl_chookidman.h"
 #include <cstdio>
 #include <stdarg.h>
+#include <shared_mutex>
+#include <unordered_map>
 
 extern SourceHook::ISourceHook *g_SHPtr;
 
@@ -213,6 +215,119 @@ namespace SourceHook
 #endif
 		}
 
+		// A CIface::GetHookListMutex() shared lock, made safe for the same
+		// thread to nest -- which real hook usage genuinely does: a handler
+		// can, directly or via something it calls, dispatch a *fresh* (non-
+		// recall) call back into the same hooked interface from within its
+		// own Pre/Post execution, which needs to shared-lock the very same
+		// mutex this thread is already holding shared for the outer call.
+		// A bare std::shared_mutex has no such guarantee -- the standard
+		// explicitly allows an implementation to deadlock a same-thread
+		// nested lock_shared() if a writer happened to queue in between the
+		// two calls (writer-starvation avoidance). This is the same problem,
+		// and the same fix, as KHook's DetourCapsule::RecursiveLockUnlockShared
+		// (detour.cpp): a thread_local refcount per mutex instance, only
+		// really locking/unlocking on the first-in/last-out transition, so
+		// nested shared acquisitions on the *same* thread never touch the
+		// underlying mutex a second time.
+		//
+		// Plain Acquire()/Release() static calls, not an RAII scope guard:
+		// the acquiring call (CSourceHookImpl::SetupHookLoop, on the fresh-
+		// context path) and the matching release (CSourceHookImpl::
+		// EndContext) are two separate function invocations, potentially far
+		// apart in the call stack (the hooked function itself runs, plus
+		// every Pre/Post handler, in between) -- there's no single scope to
+		// attach an RAII object to. CHookContext::m_LockedIface (below)
+		// records which CIface's lock a given context is holding, so
+		// EndContext knows what to release, and whether to at all.
+		class CReentrantSharedLock
+		{
+		public:
+			static void Acquire(std::shared_mutex &mtx)
+			{
+				int &count = Counts()[&mtx];
+				if (count++ == 0)
+					mtx.lock_shared();
+			}
+
+			static void Release(std::shared_mutex &mtx)
+			{
+				auto &counts = Counts();
+				auto it = counts.find(&mtx);
+				if (it != counts.end() && --(it->second) == 0)
+				{
+					mtx.unlock_shared();
+					counts.erase(it);
+				}
+			}
+
+			// True if *this* thread currently holds `mtx` shared via Acquire()
+			// above -- used by CMaybeExclusiveLock (below) to detect the
+			// "AddHook()/RemoveHookByID() called on the same iface from
+			// inside one of its own currently-running Pre/Post handlers"
+			// case, which a plain std::unique_lock would self-deadlock on
+			// (this thread already holds the mutex shared; requesting
+			// exclusive on top of that blocks forever, since a shared_mutex
+			// has no safe same-thread shared->exclusive upgrade).
+			static bool HeldByThisThread(std::shared_mutex &mtx)
+			{
+				auto &counts = Counts();
+				auto it = counts.find(&mtx);
+				return it != counts.end() && it->second > 0;
+			}
+
+		private:
+			static std::unordered_map<std::shared_mutex *, int> &Counts()
+			{
+				static thread_local std::unordered_map<std::shared_mutex *, int> s_Counts;
+				return s_Counts;
+			}
+		};
+
+		// RAII wrapper for the AddHook()/RemoveHookByID() mutation sites:
+		// takes a real exclusive lock on `mtx`, UNLESS this thread already
+		// holds it shared (CReentrantSharedLock::HeldByThisThread), in which
+		// case it does nothing and the mutation proceeds "protected" only by
+		// the fact that no *other* thread can be holding the exclusive lock
+		// right now (a shared_mutex guarantees that while any shared holder,
+		// including this thread, is active). That's sound against a
+		// concurrent writer; it is NOT a full substitute for the exclusive
+		// lock against a *different* thread that's concurrently holding the
+		// mutex shared and iterating the very list this thread is about to
+		// mutate -- reentrant self-mutation from within a running handler
+		// while a genuinely different thread is simultaneously dispatching
+		// through the *same* iface is a narrower, residual gap this pass
+		// does not fully close (documented here rather than silently
+		// accepted: closing it fully needs either a true lock-free list or
+		// deferring same-thread reentrant mutations the way SH already
+		// defers plugin unloads via PendingUnload). What this reliably
+		// prevents is the *common*, guaranteed-deadlock case: a handler
+		// adding/removing its own hook on the interface it's currently
+		// being called through.
+		class CMaybeExclusiveLock
+		{
+		public:
+			explicit CMaybeExclusiveLock(std::shared_mutex &mtx) : m_Mutex(mtx)
+			{
+				m_TookLock = !CReentrantSharedLock::HeldByThisThread(mtx);
+				if (m_TookLock)
+					m_Mutex.lock();
+			}
+
+			~CMaybeExclusiveLock()
+			{
+				if (m_TookLock)
+					m_Mutex.unlock();
+			}
+
+			CMaybeExclusiveLock(const CMaybeExclusiveLock &) = delete;
+			CMaybeExclusiveLock &operator=(const CMaybeExclusiveLock &) = delete;
+
+		private:
+			std::shared_mutex &m_Mutex;
+			bool m_TookLock;
+		};
+
 		struct CHookContext : IHookContext
 		{
 			CHookContext() : m_CleanupTask(NULL)
@@ -242,7 +357,16 @@ namespace SourceHook
 
 			CVfnPtr *pVfnPtr;
 			CIface *pIface;
-			
+
+			// The CIface (if any) whose GetHookListMutex() *this* context
+			// acquired a CReentrantSharedLock on -- set once, on the fresh-
+			// context path in SetupHookLoop, and released (if non-null) in
+			// EndContext. Deliberately not just "pIface != NULL": the
+			// Ignore(SH_CALL)/Recall reuse paths in SetupHookLoop also set
+			// pIface but must NOT lock/unlock anything, since they're
+			// reusing an oldctx that's already inside its own locked window.
+			CIface *m_LockedIface = nullptr;
+
 			META_RES *pStatus;
 			META_RES *pPrevRes;
 			META_RES *pCurRes;
@@ -324,9 +448,28 @@ namespace SourceHook
 			CHookManList m_HookManList;
 			CVfnPtrList m_VfnPtrs;
 			CHookIDManager m_HookIDMan;
-			HookContextStack m_ContextStack;
 			List<PendingUnload *> m_PendingUnloads;
 			DebugLogFunc m_LogFunc;
+
+			// Per-*calling thread*, not per-CSourceHookImpl-instance: the
+			// original single global (non-thread-local) m_ContextStack member
+			// was written for Source1's single game thread, and is genuinely
+			// unsafe the instant two threads dispatch through ANY vtable hook
+			// on this same ISourceHook instance concurrently (e.g. a
+			// networking function called from more than one thread) --
+			// both would push/pop/read the *same* CStack<CHookContext>
+			// concurrently with zero synchronization, corrupting it. A
+			// per-thread stack is the correct fix, not a mutex: each thread's
+			// hook-loop recursion (SetupHookLoop/EndContext, including
+			// recall) only ever needs to see its *own* call chain, never
+			// another thread's, so there's no cross-thread state to actually
+			// share here at all -- same reasoning as the inline-hook path's
+			// own thread_local InlineCallStack() (sourcehook_inline.h).
+			static HookContextStack &ContextStack()
+			{
+				static thread_local HookContextStack s_Stack;
+				return s_Stack;
+			}
 
 			bool SetHookPaused(int hookid, bool paused);
 			CHookManList::iterator RemoveHookManager(CHookManList::iterator iter);

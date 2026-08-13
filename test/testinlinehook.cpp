@@ -15,10 +15,16 @@
 //    member Post handler, standing in for "static or member callback") --
 //    must share exactly one safetyhook::InlineHook/dispatcher, run in
 //    Pre-then-original-then-Post order, honor MRES_* override semantics via
-//    RETURN_SH_VALUE, and fully restore the original function once
-//    every handler is removed.
+//    RETURN_SH_VALUE, and behave exactly like the original, unhooked
+//    function once every handler is removed (without actually tearing the
+//    detour down -- see RemoveHook()'s comment in sourcehook_inline.h).
 //  - a non-virtual member function (has a `this`), read back via
 //    SH_IFACEPTR inside the handler.
+//  - TestInlineHookConcurrency below: many threads hammering the hooked
+//    function while another thread concurrently adds/removes handlers on
+//    the *same* address -- the scenario that used to be able to
+//    use-after-free once the last handler dropped mid-flight on another
+//    thread (fixed by never tearing the dispatcher down on empty).
 
 #include <string>
 
@@ -205,24 +211,32 @@ bool TestInlineHook(std::string &error)
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineAdd, addr, SH_STATIC(StaticPreOverride), false),
 		"failed to remove the override Pre handler");
 
-	// Tear everything down; once the last handler goes, the real hook (and
-	// the address claim) must go with it.
+	// Remove every handler. Unlike a naive "last handler out tears the real
+	// hook down" design, the dispatcher (and its safetyhook detour) is
+	// deliberately left installed permanently once created -- same choice
+	// KHook itself makes, and for the same reason: physically uninstalling
+	// on last-remove is fundamentally unsafe to do concurrently with an
+	// in-flight call through the same target (see RemoveHook()'s comment in
+	// sourcehook_inline.h). An empty handler list just makes it a
+	// transparent passthrough, which is functionally indistinguishable from
+	// "unhooked" to a caller -- verified below.
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineAdd, addr, SH_STATIC(StaticPre), false), "failed to remove plugin A's handler");
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineAdd, addr, SH_STATIC(StaticPre), false), "failed to remove plugin C's handler");
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineAdd, addr, SH_MEMBER(&pluginB, &FakePlugin::MemberPost), true),
 		"failed to remove plugin B's handler");
 
-	CHECK(guard.TargetCount() == baseline, "dispatcher was not fully torn down after removing every handler");
+	CHECK(guard.TargetCount() == baseline + 1, "the dispatcher/claim must survive removing every handler (never auto-torn-down)");
 
 	int result4 = TargetAdd(3);
-	CHECK(result4 == 44, "function did not return to its original, unhooked behavior after teardown");
+	CHECK(result4 == 44, "function did not behave like its original, unhooked self once its handler list went empty");
 
-	// SH_CALL with nothing hooked at `addr` at all: no dispatcher exists for
-	// it, so SH_CALL must fall back to calling straight through the raw
-	// address instead of (incorrectly) creating a hook just to serve the call.
+	// SH_CALL against an address whose dispatcher is still installed but has
+	// zero handlers: Find() locates the (empty) dispatcher and calls through
+	// its trampoline -- same real original, same result, still bypasses
+	// nothing since there's nothing registered to bypass.
 	int bypassResultNoHook = SH_CALL(TestInlineAdd, addr)(3);
-	CHECK(bypassResultNoHook == 44, "SH_CALL with no active hook did not call the raw target directly");
-	CHECK(guard.TargetCount() == baseline, "SH_CALL must not install a dispatcher as a side effect");
+	CHECK(bypassResultNoHook == 44, "SH_CALL against an emptied dispatcher did not reach the real original");
+	CHECK(guard.TargetCount() == baseline + 1, "SH_CALL must not change the dispatcher/claim count");
 
 	// -------- member function: `this` via SH_IFACEPTR --------
 	// volatile + calling through a raw pointer derived once, same reasoning
@@ -255,9 +269,159 @@ bool TestInlineHook(std::string &error)
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineMemberAdd, memberAddr, SH_STATIC(MemberDetour), false),
 		"failed to remove the member-function hook");
 
-	// And again with nothing hooked at all.
+	// And again with an emptied (but still installed) dispatcher.
 	int memberBypassNoHook = SH_CALL(TestInlineMemberAdd, memberAddr, pAdder)(5);
-	CHECK(memberBypassNoHook == 15, "SH_CALL (member) with no active hook did not call the raw target directly");
+	CHECK(memberBypassNoHook == 15, "SH_CALL (member) against an emptied dispatcher did not reach the real original");
+
+	return true;
+}
+
+// -------------------- concurrency stress test --------------------
+//
+// Reproduces, under real concurrent threads, the exact race the
+// never-tear-down design in RemoveHook() (sourcehook_inline.h) closes:
+// N threads continuously calling through the hooked address while another
+// thread continuously adds and removes the *last* handler on that same
+// address. With the old "delete the dispatcher once the handler list goes
+// empty" behavior, this reliably use-after-frees within a handful of
+// iterations (the caller threads dereference a dispatcher/safetyhook::
+// InlineHook that the remover thread just freed); with the fix, it must run
+// to completion cleanly regardless of interleaving. Build with
+// -fsanitize=thread for the strongest signal; even without a sanitizer, a
+// UAF here reliably crashes or corrupts g_CallCount within a few thousand
+// iterations on a debug allocator, so a clean run without a sanitizer is
+// still meaningful evidence, just not a proof.
+
+#include <atomic>
+#include <chrono>
+#include <thread>
+#include <vector>
+
+SH_DECL_INLINEHOOK1(TestInlineConcurrency, void, int, int);
+
+namespace
+{
+	std::atomic<int> g_ConcurrencyPreCalls{ 0 };
+
+	int __attribute__((noinline)) TargetConcurrency(int x)
+	{
+		volatile int y = x + 1;
+		asm volatile(
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			::: "memory");
+		return y;
+	}
+
+	int ConcurrencyPre(int x)
+	{
+		g_ConcurrencyPreCalls.fetch_add(1, std::memory_order_relaxed);
+		(void)x;
+		return 0; // no RETURN_SH_INLINE_VALUE call -> MRES_IGNORED, same as StaticPre above
+	}
+}
+
+bool TestInlineHookConcurrency(std::string &error)
+{
+	void *addr = reinterpret_cast<void *>(&TargetConcurrency);
+
+	static constexpr int kCallerThreads = 4;
+
+	// Wall-clock deadline rather than a fixed iteration count: a fixed count
+	// is fragile across environments -- a fast, uncontended churn loop (just
+	// two mutex-protected map operations each) can easily finish all its
+	// iterations before the OS has even scheduled the caller threads onto a
+	// core for the first time, especially under a hypervisor/container CPU
+	// scheduler, which would "pass" without ever actually exercising the
+	// overlap this test exists to hit. Running both sides until a shared
+	// deadline guarantees they're live at the same time regardless of how
+	// fast either loop body happens to be on a given machine.
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+
+	std::atomic<bool> stop{ false };
+	std::atomic<bool> sawBadResult{ false };
+
+	// Establish the hook -- i.e. let safetyhook::InlineHook::create() (via
+	// CInlineDispatcher::Install(), the *first* GetOrCreate() call for this
+	// address) actually patch TargetConcurrency's bytes -- BEFORE any caller
+	// thread starts calling it. This is deliberate, not incidental: the
+	// vendored safetyhook's trap_threads() (safetyhook.cpp, the Linux
+	// SAFETYHOOK_OS_LINUX branch) is a no-op passthrough on Linux --
+	// `run_fn()` executes with no thread suspension/instruction-pointer
+	// fixup around it at all, unlike the real Windows implementation (which
+	// uses a vectored exception handler to catch and redirect any thread
+	// caught mid-region). That means the very first physical patch of a
+	// function's bytes is NOT safe to race against a thread already
+	// executing inside it on this platform -- a thread can be caught
+	// mid-instruction when the bytes underneath it change, which is exactly
+	// what crashed this test before this ordering was pinned down (not a
+	// SourceHook bug: same underlying gap KHook would hit installing its own
+	// first hook on an already-hot function). What this test actually
+	// verifies -- and what CInlineDispatcher::RemoveHook() never tearing the
+	// dispatcher down on empty fixes -- is safe *after* that first install:
+	// N threads calling concurrently while another thread repeatedly adds
+	// and removes handlers (pure list mutation from here on, no re-patching)
+	// must never race against a concurrent Uninstall()+delete, because there
+	// no longer is one.
+	{
+		int id = SH_ADD_INLINEHOOK(TestInlineConcurrency, addr, SH_STATIC(ConcurrencyPre), false);
+		CHECK(id != 0, "failed to establish the initial hook before starting the concurrency stress");
+		SH_REMOVE_INLINEHOOK(TestInlineConcurrency, addr, SH_STATIC(ConcurrencyPre), false);
+	}
+
+	// Caller threads: hammer the hooked address the whole time. Whether a
+	// given call happens to see the handler installed or not is irrelevant
+	// -- TargetConcurrency(x) must ALWAYS return x + 1 either way, and must
+	// never crash/UB regardless of what the churn thread is doing
+	// concurrently.
+	std::vector<std::thread> callers;
+	for (int t = 0; t < kCallerThreads; ++t)
+	{
+		callers.emplace_back([&, t] {
+			int i = 0;
+			while (!stop.load(std::memory_order_relaxed) && std::chrono::steady_clock::now() < deadline)
+			{
+				int x = (t * 1000000) + i++;
+				int result = TargetConcurrency(x);
+				if (result != x + 1)
+				{
+					sawBadResult.store(true, std::memory_order_relaxed);
+					stop.store(true, std::memory_order_relaxed);
+					break;
+				}
+			}
+		});
+	}
+
+	// Churn thread: repeatedly add then remove the only handler on this
+	// address, from a different thread than every caller above -- this is
+	// what used to race the callers' CallOriginal()/RunChain() against a
+	// concurrent Uninstall()+delete.
+	std::thread churner([&] {
+		while (!stop.load(std::memory_order_relaxed) && std::chrono::steady_clock::now() < deadline)
+		{
+			int id = SH_ADD_INLINEHOOK(TestInlineConcurrency, addr, SH_STATIC(ConcurrencyPre), false);
+			if (id == 0)
+			{
+				sawBadResult.store(true, std::memory_order_relaxed);
+				break;
+			}
+			SH_REMOVE_INLINEHOOK(TestInlineConcurrency, addr, SH_STATIC(ConcurrencyPre), false);
+		}
+		stop.store(true, std::memory_order_relaxed);
+	});
+
+	churner.join();
+	for (auto &th : callers)
+		th.join();
+
+	CHECK(!sawBadResult.load(), "concurrent add/remove vs. dispatch produced a wrong result (or add failed) -- see comment above");
+
+	// Sanity: the Pre handler must have actually fired at least once while
+	// installed (otherwise the churn thread's add/remove was too fast
+	// relative to the callers to prove anything, and the run above wasn't
+	// actually exercising the hooked path at all).
+	CHECK(g_ConcurrencyPreCalls.load() > 0, "Pre handler never ran during the concurrency test -- churn/caller timing didn't overlap at all");
 
 	return true;
 }

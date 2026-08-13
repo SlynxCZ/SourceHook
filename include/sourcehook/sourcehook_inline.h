@@ -106,6 +106,8 @@
 #include <cstdio>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <type_traits>
 #include <typeinfo>
@@ -277,10 +279,32 @@ namespace SourceHook
 			}
 
 			// Removes the first handler matching `handler`/`post`. Returns
-			// true if a handler was removed. If this was the last handler for
-			// this address, the dispatcher (and its safetyhook detour) is torn
-			// down; do not use the dispatcher pointer again after this call
-			// returns true and HandlerCount() was 1 beforehand.
+			// true if a handler was removed.
+			//
+			// Deliberately does NOT tear down the safetyhook detour (or free
+			// the dispatcher) when the handler list becomes empty -- same
+			// choice KHook itself makes (see DetourCapsule::RemoveHook: the
+			// capsule and its JIT dispatcher live for the process' lifetime
+			// once created; an empty callback list just makes it a transparent
+			// passthrough straight to the original, which RunChain() already
+			// does for free when preCopy/postCopy are both empty). A *real*
+			// unpatch-on-last-remove is fundamentally at odds with safe
+			// concurrent dispatch: some other thread (or, reentrantly, this
+			// same thread from inside its own handler) could be mid-RunChain
+			// -- inside CallOriginal(), reading m_Hook -- at the exact moment
+			// this call decides to destroy m_Hook/free the trampoline/delete
+			// the dispatcher. Closing that race properly would need either
+			// full refcounted/RCU-style deferred destruction, or an
+			// exclusive/shared lock held for the *entire* call duration (which
+			// self-deadlocks the instant a handler unhooks its own last
+			// registration on its own address, since std::shared_mutex has no
+			// safe shared->exclusive upgrade). Never physically tearing down
+			// sidesteps the whole problem: nothing is ever destroyed while
+			// something might still be using it, so no lock is even needed
+			// for this axis at all. The one-time cost is a permanent, empty
+			// passthrough hop + a small heap object per distinct address ever
+			// inline-hooked, for the life of the process -- bounded by
+			// distinct hooked addresses, not by hook add/remove churn.
 			static bool RemoveHook(void *addr, Handler handler, bool post)
 			{
 				std::lock_guard<std::mutex> lock(Map_Mutex());
@@ -290,15 +314,7 @@ namespace SourceHook
 					return false;
 
 				CInlineDispatcher *disp = it->second;
-				bool removed = disp->RemoveHookLocked(handler, post);
-				if (removed && disp->EmptyLocked())
-				{
-					map.erase(it);
-					disp->Uninstall();
-					CInlineHookAddressGuard::Get().Release(addr);
-					delete disp;
-				}
-				return removed;
+				return disp->RemoveHookLocked(handler, post);
 			}
 
 			std::size_t HandlerCount() const
@@ -356,14 +372,59 @@ namespace SourceHook
 				m_Hook = std::move(result.value());
 				m_TargetAddr = addr;
 				m_Slot = slot;
+
+				// Snapshot exactly the bytes we ourselves just patched in, so
+				// a later HardUninstall() (see below) can tell "is this still
+				// my patch" from "someone else (a different, independent
+				// hooking engine -- e.g. KHook -- re-detoured on top of me)"
+				// before blindly restoring the pre-hook original over
+				// whatever's live there now.
+				m_InstalledBytes.assign(
+					reinterpret_cast<const std::uint8_t *>(m_TargetAddr),
+					reinterpret_cast<const std::uint8_t *>(m_TargetAddr) + m_Hook.original_bytes().size());
+
 				return true;
 			}
 
-			void Uninstall()
+			// Not called automatically (see RemoveHook() above for why) --
+			// kept as an explicit, best-effort escape hatch for a genuine
+			// full-engine-shutdown path, should one ever need it. Guarded
+			// against the exact hazard uncovered while investigating
+			// cross-engine coexistence with KHook: safetyhook::InlineHook's
+			// own disable()/destroy() unconditionally memcpy's the bytes it
+			// captured at install time back over the live target, with no
+			// check of what's actually there *now* -- if some other,
+			// independent hooking engine detoured the same address on top of
+			// us in the meantime, that blind restore would silently eject
+			// (or, worse, if that other engine already tore its own trampoline
+			// down too, physically corrupt) live, executing machine code.
+			// So: only actually revert if the target's bytes are still
+			// byte-for-byte what we ourselves last installed there; otherwise
+			// leave it alone and report the mismatch instead of touching it.
+			bool HardUninstall()
 			{
+				if (m_TargetAddr && !m_InstalledBytes.empty())
+				{
+					if (std::memcmp(m_TargetAddr, m_InstalledBytes.data(), m_InstalledBytes.size()) != 0)
+					{
+						std::fprintf(stderr,
+							"[SourceHook] CInlineDispatcher::HardUninstall: target %p no longer holds the "
+							"bytes we installed -- some other hooking engine patched on top of us. Leaving "
+							"the target untouched instead of blindly restoring over it (which would corrupt "
+							"live code or silently eject the other engine's hook).\n",
+							m_TargetAddr);
+						return false;
+					}
+				}
+
 				m_Hook = {};
+				m_InstalledBytes.clear();
 				if (m_Slot >= 0)
+				{
 					FreeSlot(m_Slot);
+					m_Slot = -1;
+				}
+				return true;
 			}
 
 			int ClaimSlot()
@@ -419,6 +480,10 @@ namespace SourceHook
 				return false;
 			}
 
+			// True once no handler is registered any more (the dispatcher
+			// keeps running as a transparent passthrough at that point --
+			// see RemoveHook() above). Exposed for introspection/tests, not
+			// used as a teardown trigger.
 			bool EmptyLocked() const
 			{
 				std::lock_guard<std::mutex> lock(m_Mutex);
@@ -520,6 +585,7 @@ namespace SourceHook
 
 			void *m_TargetAddr = nullptr;
 			safetyhook::InlineHook m_Hook;
+			std::vector<std::uint8_t> m_InstalledBytes; // see HardUninstall()
 			int m_Slot = -1;
 			int m_NextId = 1;
 			std::vector<Entry> m_Pre;

@@ -17,6 +17,7 @@
 #include <string>
 
 bool TestInlineHook(std::string &error);
+bool TestInlineHookConcurrency(std::string &error);
 
 int main()
 {
@@ -26,7 +27,14 @@ int main()
 		std::cout << "TestInlineHook FAILED: " << error << std::endl;
 		return 1;
 	}
-
 	std::cout << "TestInlineHook passed" << std::endl;
+
+	if (!TestInlineHookConcurrency(error))
+	{
+		std::cout << "TestInlineHookConcurrency FAILED: " << error << std::endl;
+		return 1;
+	}
+	std::cout << "TestInlineHookConcurrency passed" << std::endl;
+
 	return 0;
 }
