@@ -1,4 +1,11 @@
 /* ======== SourceHook ========
+* Copyright (C) 2004-2026 Metamod:Source Development Team
+* No warranties of any kind
+*
+* License: zlib/libpng
+*
+* Author(s): Michal "Slynx" Přikryl
+*
 * GENERATED FILE -- do not edit by hand.
 * Regenerate with: python3 generate/gen_inline_hooks.py
 *

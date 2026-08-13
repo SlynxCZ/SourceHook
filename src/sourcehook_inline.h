@@ -1,8 +1,10 @@
 /* ======== SourceHook ========
-* Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙) -- inline hook dispatch
+* Copyright (C) 2004-2026 Metamod:Source Development Team
 * No warranties of any kind
 *
 * License: zlib/libpng
+*
+* Author(s): Michal "Slynx" Přikryl
 * ============================
 */
 
@@ -418,7 +420,7 @@ namespace SourceHook
 	}
 }
 
-#include "generate/sourcehook_inline_decl.h"
+#include "../generate/sourcehook_inline_decl.h"
 
 #define SH_ADD_INLINEHOOK(hookname, targetAddr, handler, post) \
 	::SourceHook::Impl::AddInlineHook<SourceHookInlineDecl::hookname::Dispatcher>((targetAddr), (handler), (post))

@@ -1,4 +1,5 @@
-# Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙)
+# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Author(s): Michal "Slynx" Přikryl
 # Local/dev test build. Two separate binaries, matching test/AMBuilder's
 # scope split:
 #   test_sourcehook        - legacy suite ported from metamod-source, x86 only

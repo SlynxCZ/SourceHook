@@ -1,5 +1,6 @@
 # vim: set sts=2 ts=8 sw=2 tw=99 et:
-# Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙)
+# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Author(s): Michal "Slynx" Přikryl
 import sys
 try:
   from ambuild2 import run, util

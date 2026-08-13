@@ -35,12 +35,13 @@ relies on throughout. GCC ≥10 is untested but should work; adjust `CXX`/`CC`
 
 ## Layout
 
-- Root: SourceHook's engine, copied from `metamod-source/core/sourcehook`
+- `src/` — SourceHook's engine, copied from `metamod-source/core/sourcehook`
   unmodified except for removing a dead, metamod-only debug helper (see
   "Decoupling from metamod" below) — `sourcehook.h`/`.cpp`,
   `sourcehook_impl*`, `sourcehook_hookmangen*`, `sh_*.h`, `FastDelegate.h`.
-- `sourcehook_inline.h`, `sourcehook_impl_inline.h/.cpp` — the new inline-hook
-  dispatch layer. Start reading at `sourcehook_inline.h`'s file header.
+  Also where the new inline-hook dispatch layer lives:
+  `sourcehook_inline.h`, `sourcehook_impl_inline.h/.cpp` — start reading at
+  `sourcehook_inline.h`'s file header.
 - `vendor/` — `safetyhook` (the inline-hook engine), `zydis` (safetyhook's
   disassembler dependency), `tl::expected` (safetyhook's error type). Copied
   as plain files from `InventoryManager_mm_es/vendor`, not submodules.

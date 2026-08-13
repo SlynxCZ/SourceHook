@@ -1,4 +1,5 @@
-# Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙)
+# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Author(s): Michal "Slynx" Přikryl
 cmake_minimum_required(VERSION 3.18)
 project(sourcehook CXX C)
 
@@ -15,20 +16,20 @@ option(SOURCEHOOK_BUILD_TESTS "Build the SourceHook test suite" ON)
 include(makefiles/shared.cmake)
 
 set(SOURCEHOOK_SOURCES
-    sourcehook.cpp
-    sourcehook_impl_chookidman.cpp
-    sourcehook_impl_chookmaninfo.cpp
-    sourcehook_impl_cproto.cpp
-    sourcehook_impl_cvfnptr.cpp
-    sourcehook_hookmangen.cpp
-    sourcehook_impl_inline.cpp
+    src/sourcehook.cpp
+    src/sourcehook_impl_chookidman.cpp
+    src/sourcehook_impl_chookmaninfo.cpp
+    src/sourcehook_impl_cproto.cpp
+    src/sourcehook_impl_cvfnptr.cpp
+    src/sourcehook_hookmangen.cpp
+    src/sourcehook_impl_inline.cpp
     vendor/safetyhook/safetyhook.cpp
     vendor/zydis/Zydis.c
 )
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     if(WIN32)
-        list(APPEND SOURCEHOOK_SOURCES sourcehook_hookmangen_x86_64.cpp)
+        list(APPEND SOURCEHOOK_SOURCES src/sourcehook_hookmangen_x86_64.cpp)
     else()
         # Upstream metamod-source's own root AMBuilder excludes this file on
         # Linux x86_64 too (core/AMBuilder: `arch == 'x86_64' and platform !=
@@ -45,7 +46,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     endif()
 else()
     list(APPEND SOURCEHOOK_SOURCES
-        sourcehook_hookmangen_x86.cpp
+        src/sourcehook_hookmangen_x86.cpp
     )
     message(WARNING "Inline-hook dispatch (sourcehook_inline.h) is only implemented/tested for x86_64 SysV right now; SH_DECL_INLINEHOOK* will not have the correct calling convention on 32-bit.")
 endif()
@@ -53,7 +54,7 @@ endif()
 add_library(sourcehook STATIC ${SOURCEHOOK_SOURCES})
 
 target_include_directories(sourcehook PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/safetyhook
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tl

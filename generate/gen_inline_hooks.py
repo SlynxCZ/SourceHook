@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # vim: set sts=2 ts=8 sw=2 tw=99 et:
-# Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙)
+# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Author(s): Michal "Slynx" Přikryl
 """Generates sourcehook_inline_decl.h: the SH_DECL_INLINEHOOK0..MAX_ARITY family
 of macros, one per parameter count, following the exact textual shape of
 upstream's own SH_DECL_MANUALHOOK0..20 macros (see sourcehook.h) so inline
@@ -19,7 +20,13 @@ import os
 MAX_ARITY = 20
 
 HEADER = """/* ======== SourceHook ========
-* Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙)
+* Copyright (C) 2004-2026 Metamod:Source Development Team
+* No warranties of any kind
+*
+* License: zlib/libpng
+*
+* Author(s): Michal "Slynx" Přikryl
+*
 * GENERATED FILE -- do not edit by hand.
 * Regenerate with: python3 generate/gen_inline_hooks.py
 *

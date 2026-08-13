@@ -1,5 +1,6 @@
 # vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
-# Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙)
+# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Author(s): Michal "Slynx" Přikryl
 import os, sys
 
 class SourceHookConfig(object):
@@ -105,7 +106,7 @@ class SourceHookConfig(object):
 
   def AddVendorIncludes(self, binary):
     binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath),
+      os.path.join(builder.sourcePath, 'src'),
       os.path.join(builder.sourcePath, 'vendor'),
       os.path.join(builder.sourcePath, 'vendor', 'safetyhook'),
       os.path.join(builder.sourcePath, 'vendor', 'tl'),
@@ -133,17 +134,17 @@ class SourceHookConfig(object):
       lib = self.Library(cxx, 'sourcehook')
 
       lib.sources += [
-        'sourcehook.cpp',
-        'sourcehook_impl_chookidman.cpp',
-        'sourcehook_impl_chookmaninfo.cpp',
-        'sourcehook_impl_cproto.cpp',
-        'sourcehook_impl_cvfnptr.cpp',
-        'sourcehook_hookmangen.cpp',
-        'sourcehook_impl_inline.cpp',
+        os.path.join('src', 'sourcehook.cpp'),
+        os.path.join('src', 'sourcehook_impl_chookidman.cpp'),
+        os.path.join('src', 'sourcehook_impl_chookmaninfo.cpp'),
+        os.path.join('src', 'sourcehook_impl_cproto.cpp'),
+        os.path.join('src', 'sourcehook_impl_cvfnptr.cpp'),
+        os.path.join('src', 'sourcehook_hookmangen.cpp'),
+        os.path.join('src', 'sourcehook_impl_inline.cpp'),
       ]
 
       if cxx.target.arch == 'x86':
-        lib.sources += ['sourcehook_hookmangen_x86.cpp']
+        lib.sources += [os.path.join('src', 'sourcehook_hookmangen_x86.cpp')]
       elif cxx.target.arch == 'x86_64' and cxx.target.platform != 'linux':
         # Matches metamod-source's own core/AMBuilder: the x86_64 vtable
         # hookmangen's GCC/Linux register-marshaling paths are
@@ -151,7 +152,7 @@ class SourceHookConfig(object):
         # identifier (a reserved alternative token under GCC/Clang), so it
         # isn't built on Linux x86_64 upstream either. Inline hooks
         # (sourcehook_inline.h) don't depend on this file.
-        lib.sources += ['sourcehook_hookmangen_x86_64.cpp']
+        lib.sources += [os.path.join('src', 'sourcehook_hookmangen_x86_64.cpp')]
 
       self.AddVendorSources(lib)
       self.AddVendorIncludes(lib)
