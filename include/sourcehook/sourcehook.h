@@ -40,7 +40,11 @@
 // 4 - addition of hook ids and vp hooks (with them, AddHookNew and RemoveHookNew)
 //     This is not a SH_IFACE_VERSION change so that old plugins continue working!
 // 5 - implementation of the new "V2" interface
-#define SH_IMPL_VERSION 5
+// 6 - SlynxCZ/SourceHook fork: CSourceHookImpl now also backs inline hooks
+//     (the thread-local inline call-frame stack the unified SH_IFACEPTR/
+//     RETURN_SH/etc. macros check) alongside the existing vtable-hook
+//     bookkeeping -- matches the SH_IFACE_VERSION 6 bump above.
+#define SH_IMPL_VERSION 6
 
 // Hookman version:
 // 1 - standard
