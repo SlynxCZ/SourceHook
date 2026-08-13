@@ -19,32 +19,36 @@
 //
 //   int MyDetour(CBaseEntity *pEnt)
 //   {
-//       RETURN_SH_INLINE_VALUE(MRES_SUPERCEDE, 1);
+//       RETURN_SH_VALUE(MRES_SUPERCEDE, 1);
 //   }
 //
 //   // non-virtual member function (thisclass = CBaseEntity): `this` isn't
 //   // part of the declared parameter list, same as SH_DECL_HOOK/
-//   // SH_DECL_MANUALHOOK -- get it via SH_INLINE_IFACEPTR, same spirit as
-//   // META_IFACEPTR for vtable hooks:
+//   // SH_DECL_MANUALHOOK -- get it via SH_IFACEPTR, same macro typed/manual
+//   // (vtable) hooks already use:
 //   SH_DECL_INLINEHOOK1(MyOtherHook, CBaseEntity, void, int);
 //
 //   void MyOtherDetour(int x)
 //   {
-//       CBaseEntity *pThis = SH_INLINE_IFACEPTR(CBaseEntity);
-//       RETURN_SH_INLINE(MRES_IGNORED);
+//       CBaseEntity *pThis = SH_IFACEPTR(CBaseEntity);
+//       RETURN_SH(MRES_IGNORED);
 //   }
 //
 //   SH_ADD_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false);
 //   SH_ADD_INLINEHOOK(MyHook, targetAddr, SH_MEMBER(this, &MyClass::MyDetour), true);
 //   SH_REMOVE_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false);
 //
-// SH_INLINE_IFACEPTR/RETURN_SH_INLINE/RETURN_SH_INLINE_VALUE/SET_SH_INLINE_RESULT/SH_INLINE_ORIG_RET are a
-// dedicated set of macros for inline hooks -- deliberately not reusing
-// META_IFACEPTR/RETURN_META/RETURN_META_VALUE/SET_META_RESULT (which stay
-// exclusive to typed/manual vtable hooks, backed by ISourceHook's own
-// internal hook-loop context). Inline hooks are backed by their own,
-// separate thread-local "current call" frame stack below -- same spirit
-// and naming convention, distinct machinery, so the two never collide.
+// SH_IFACEPTR/RETURN_SH/RETURN_SH_VALUE/SET_SH_RESULT/SH_RESULT_ORIG_RET are
+// the *same* macros typed/manual (vtable) hooks already use (sourcehook.h) --
+// including this header makes them auto-detect whether an inline-hook frame
+// is currently active and route accordingly, so a file mixing both hook
+// styles (the common case -- see InventoryManager_mm_es) only ever writes
+// one set of macros in a handler body. Only SH_DECL_*/SH_ADD_*/SH_REMOVE_*
+// still differ per hook style, since that's inherent to how each one is
+// installed/removed. Inline hooks are backed by their own, separate
+// thread-local "current call" frame stack (below) rather than
+// ISourceHook's internal hook-loop context -- that's what the detection
+// above is actually switching on.
 //
 // If two different SH_ADD_INLINEHOOK calls (from the same plugin or two
 // different ones) resolve to the *same* targetAddr with the *same* declared
@@ -76,9 +80,9 @@
 // function is byte-identical to calling a free function whose first
 // parameter is the class pointer. `thisclass` in SH_DECL_INLINEHOOKn (void
 // for none) is what tells the dispatcher to include that leading parameter
-// in the real trampoline signature it hands to safetyhook; SH_INLINE_IFACEPTR just
-// reads it back out of the current call frame, matching META_IFACEPTR's
-// ergonomics without exposing `this` as a fake extra entry in Args....
+// in the real trampoline signature it hands to safetyhook; SH_IFACEPTR just
+// reads it back out of the current call frame instead of exposing `this`
+// as a fake extra entry in Args....
 // There's no thisptroffs/adjustor support (same limitation InventoryManager
 // already has today hooking member functions directly through raw
 // safetyhook, not a regression).
@@ -118,8 +122,8 @@ namespace SourceHook
 {
 	namespace Impl
 	{
-		// The "current inline hook call" frame: what SH_INLINE_IFACEPTR/RETURN_SH_INLINE/
-		// RETURN_SH_INLINE_VALUE/SH_INLINE_ORIG_RET read and write. Type-erased (void*)
+		// The "current inline hook call" frame: what SHINT_INLINE_IFACEPTR/SHINT_RETURN_INLINE/
+		// SHINT_RETURN_INLINE_VALUE/SHINT_INLINE_ORIG_RET read and write. Type-erased (void*)
 		// deliberately -- exactly like ISourceHook's own hook-loop context is
 		// type-erased for typed/manual hooks -- so these macros don't need to
 		// know or carry the declared (ThisClass, Ret, Args...) shape; the
@@ -153,7 +157,7 @@ namespace SourceHook
 		inline CInlineCallFrame *CurrentInlineFrame()
 		{
 			auto &stack = InlineCallStack();
-			SH_ASSERT(!stack.empty(), ("SH_INLINE_IFACEPTR/RETURN_SH_INLINE/RETURN_SH_INLINE_VALUE/SH_INLINE_ORIG_RET used outside of an inline hook handler"));
+			SH_ASSERT(!stack.empty(), ("SHINT_INLINE_IFACEPTR/SHINT_RETURN_INLINE/SHINT_RETURN_INLINE_VALUE/SHINT_INLINE_ORIG_RET used outside of an inline hook handler"));
 			return stack.empty() ? nullptr : stack.back();
 		}
 
@@ -215,7 +219,7 @@ namespace SourceHook
 		public:
 			// Handlers have the hooked function's own real signature -- no
 			// `this` in here regardless of ThisClass, same as a typed/manual
-			// hook's generated Func() override; get `this` via SH_INLINE_IFACEPTR.
+			// hook's generated Func() override; get `this` via SHINT_INLINE_IFACEPTR.
 			using Handler = fastdelegate::FastDelegate<Ret, Args...>;
 
 			static constexpr std::size_t kMaxConcurrentTargets = 64;
@@ -409,11 +413,11 @@ namespace SourceHook
 			}
 
 			// Calls `handler(args...)`. The handler communicates its META_RES
-			// (via RETURN_SH_INLINE/RETURN_SH_INLINE_VALUE, or just SET_SH_INLINE_RESULT + a plain
+			// (via SHINT_RETURN_INLINE/SHINT_RETURN_INLINE_VALUE, or just SHINT_SET_INLINE_RESULT + a plain
 			// return) and, for non-void Ret, its override value as side
 			// effects on `frame` before returning -- the actual C++ return
 			// value of a Ret-returning handler is *also* honored as the
-			// override when the handler didn't call RETURN_SH_INLINE_VALUE itself
+			// override when the handler didn't call SHINT_RETURN_INLINE_VALUE itself
 			// (see below), so a handler that just does `return x;` without
 			// bothering with the macro still works, matching how permissive
 			// typed-hook handlers already are today.
@@ -521,49 +525,49 @@ namespace SourceHook
 	}
 }
 
-// SH_INLINE_IFACEPTR(type): `this` of the function currently being inline-hooked,
+// SHINT_INLINE_IFACEPTR(type): `this` of the function currently being inline-hooked,
 // cast to `type*`. Only meaningful if the hook was declared with a non-void
 // thisclass; nullptr otherwise. Mirrors META_IFACEPTR's ergonomics for
 // typed/manual (vtable) hooks.
-#define SH_INLINE_IFACEPTR(type) (reinterpret_cast<type *>(::SourceHook::Impl::CurrentInlineFrame()->this_))
+#define SHINT_INLINE_IFACEPTR(type) (reinterpret_cast<type *>(::SourceHook::Impl::CurrentInlineFrame()->this_))
 
-// SH_INLINE_ORIG_RET(type): the original function's return value, cast to `type`.
+// SHINT_INLINE_ORIG_RET(type): the original function's return value, cast to `type`.
 // Only valid once the original has actually run -- i.e. in a Post handler,
 // or in a Pre handler that runs after an earlier Pre handler already forced
-// the call via RETURN_SH_INLINE(MRES_HANDLED) or lower. Guard with
+// the call via SHINT_RETURN_INLINE(MRES_HANDLED) or lower. Guard with
 // SH_INLINE_ORIG_CALLED if a Post handler might run after an *earlier*
 // handler already SUPERCEDEd the call (in which case the original never ran
 // and there's nothing to read).
-#define SH_INLINE_ORIG_RET(type) (*reinterpret_cast<const type *>(::SourceHook::Impl::CurrentInlineFrame()->orig_ret))
+#define SHINT_INLINE_ORIG_RET(type) (*reinterpret_cast<const type *>(::SourceHook::Impl::CurrentInlineFrame()->orig_ret))
 
 // SH_INLINE_ORIG_CALLED: true once the original function has actually been
 // invoked for the current call. False in a Post handler when some earlier
-// Pre handler already SUPERCEDEd the call -- SH_INLINE_ORIG_RET is not safe
+// Pre handler already SUPERCEDEd the call -- SHINT_INLINE_ORIG_RET is not safe
 // to read in that case.
 #define SH_INLINE_ORIG_CALLED() (::SourceHook::Impl::CurrentInlineFrame()->orig_ret != nullptr)
 
-// SH_INLINE_RESULT: the highest META_RES set so far for the current call
+// SHINT_INLINE_RESULT: the highest META_RES set so far for the current call
 // (by this handler or any earlier one). Mirrors META_RESULT_STATUS.
-#define SH_INLINE_RESULT() (::SourceHook::Impl::CurrentInlineFrame()->status)
+#define SHINT_INLINE_RESULT() (::SourceHook::Impl::CurrentInlineFrame()->status)
 
-#define SET_SH_INLINE_RESULT(result) \
+#define SHINT_SET_INLINE_RESULT(result) \
 	do { \
 		auto *__shFrame = ::SourceHook::Impl::CurrentInlineFrame(); \
 		if ((result) > __shFrame->status) \
 			__shFrame->status = (result); \
 	} while (0)
 
-// RETURN_SH_INLINE(result): for void-returning inline hook handlers.
-#define RETURN_SH_INLINE(result) \
-	do { SET_SH_INLINE_RESULT(result); return; } while (0)
+// SHINT_RETURN_INLINE(result): for void-returning inline hook handlers.
+#define SHINT_RETURN_INLINE(result) \
+	do { SHINT_SET_INLINE_RESULT(result); return; } while (0)
 
-// RETURN_SH_INLINE_VALUE(result, value): for non-void inline hook handlers. `value`
+// SHINT_RETURN_INLINE_VALUE(result, value): for non-void inline hook handlers. `value`
 // becomes the override return value whenever `result` is MRES_OVERRIDE or
 // MRES_SUPERCEDE (same threshold as typed/manual hooks).
-#define RETURN_SH_INLINE_VALUE(result, value) \
+#define SHINT_RETURN_INLINE_VALUE(result, value) \
 	do { \
 		auto *__shFrame = ::SourceHook::Impl::CurrentInlineFrame(); \
-		SET_SH_INLINE_RESULT(result); \
+		SHINT_SET_INLINE_RESULT(result); \
 		if ((result) >= MRES_OVERRIDE && __shFrame->override_ret) \
 		{ \
 			using __ShRetT = std::decay_t<decltype(value)>; \
@@ -579,6 +583,54 @@ namespace SourceHook
 // hook styles' declare macros in one place. This file only needs to supply
 // the real CInlineDispatcher implementation (above) and the "add"/"remove"
 // halves below, which do need safetyhook.hpp.
+
+// One macro surface for the handler body, regardless of hook style. Once
+// this header is included, SH_IFACEPTR/RETURN_SH/RETURN_SH_VALUE/
+// SET_SH_RESULT/SH_RESULT_ORIG_RET each check whether an inline-hook frame
+// is currently active (SourceHook::Impl::InlineCallStack() non-empty) and
+// route to the inline implementation above if so, or fall back to their
+// original sourcehook.h behavior (SH_GLOB_SHPTR's own hook-loop context)
+// otherwise -- so a file with both typed/manual *and* inline hooks (like
+// most real plugins) only ever writes one set of macros; the only place
+// hook style is still spelled out is SH_DECL_*/SH_ADD_*/SH_REMOVE_*.
+#undef SH_IFACEPTR
+#define SH_IFACEPTR(type) \
+	(::SourceHook::Impl::InlineCallStack().empty() \
+		? reinterpret_cast<type *>(SH_GLOB_SHPTR->GetIfacePtr()) \
+		: SHINT_INLINE_IFACEPTR(type))
+
+#undef SET_SH_RESULT
+#define SET_SH_RESULT(result) \
+	do { \
+		if (!::SourceHook::Impl::InlineCallStack().empty()) \
+			SHINT_SET_INLINE_RESULT(result); \
+		else \
+			SH_GLOB_SHPTR->SetRes(result); \
+	} while (0)
+
+#undef RETURN_SH
+#define RETURN_SH(result) \
+	do { \
+		if (!::SourceHook::Impl::InlineCallStack().empty()) \
+			SHINT_RETURN_INLINE(result); \
+		SET_SH_RESULT(result); \
+		return; \
+	} while (0)
+
+#undef RETURN_SH_VALUE
+#define RETURN_SH_VALUE(result, value) \
+	do { \
+		if (!::SourceHook::Impl::InlineCallStack().empty()) \
+			SHINT_RETURN_INLINE_VALUE(result, value); \
+		SET_SH_RESULT(result); \
+		return (value); \
+	} while (0)
+
+#undef SH_RESULT_ORIG_RET
+#define SH_RESULT_ORIG_RET(type) \
+	(::SourceHook::Impl::InlineCallStack().empty() \
+		? *SourceHook::MacroRefHelpers<type>::GetOrigRet(SH_GLOB_SHPTR) \
+		: SHINT_INLINE_ORIG_RET(type))
 
 #define SH_ADD_INLINEHOOK(hookname, targetAddr, handler, post) \
 	::SourceHook::Impl::AddInlineHook<SourceHookInlineDecl::hookname::Dispatcher>((targetAddr), (handler), (post))

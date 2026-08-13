@@ -15,14 +15,24 @@
 //    member Post handler, standing in for "static or member callback") --
 //    must share exactly one safetyhook::InlineHook/dispatcher, run in
 //    Pre-then-original-then-Post order, honor MRES_* override semantics via
-//    RETURN_SH_INLINE_VALUE, and fully restore the original function once
+//    RETURN_SH_VALUE, and fully restore the original function once
 //    every handler is removed.
 //  - a non-virtual member function (has a `this`), read back via
-//    SH_INLINE_IFACEPTR inside the handler.
+//    SH_IFACEPTR inside the handler.
 
 #include <string>
 
 #include "sourcehook_inline.h"
+
+// SH_IFACEPTR/RETURN_SH/RETURN_SH_VALUE/SET_SH_RESULT/SH_RESULT_ORIG_RET
+// (sourcehook_inline.h) always reference SH_GLOB_SHPTR (default: g_SHPtr) in
+// the compiled code for their vtable-hook fallback branch, even where that
+// branch is never actually *taken* at runtime -- this test only ever uses
+// inline hooks, so it's dead code here, but the symbol still has to exist
+// for the TU to compile. A real metamod:source plugin already gets this for
+// free from PLUGIN_EXPOSE(); a standalone tool/test needs its own stand-in.
+SourceHook::ISourceHook *g_SHPtr = nullptr;
+SourceHook::Plugin g_PLID = 0;
 
 // -------------------- free function (thisclass = void) --------------------
 
@@ -63,7 +73,7 @@ namespace
 
 	int StaticPreOverride(int)
 	{
-		RETURN_SH_INLINE_VALUE(MRES_SUPERCEDE, 1234);
+		RETURN_SH_VALUE(MRES_SUPERCEDE, 1234);
 	}
 
 	struct FakePlugin
@@ -72,10 +82,10 @@ namespace
 		{
 			++g_PostCalls;
 			// An earlier Pre handler may have SUPERCEDEd the call (see the
-			// override test below) -- SH_INLINE_ORIG_RET is only safe to
+			// override test below) -- SH_RESULT_ORIG_RET is only safe to
 			// read once the original actually ran.
 			if (SH_INLINE_ORIG_CALLED())
-				g_LastOrigRet = SH_INLINE_ORIG_RET(int);
+				g_LastOrigRet = SH_RESULT_ORIG_RET(int);
 			return 0;
 		}
 	};
@@ -132,7 +142,7 @@ namespace
 {
 	int MemberDetour(int x)
 	{
-		g_LastThis = SH_INLINE_IFACEPTR(Adder);
+		g_LastThis = SH_IFACEPTR(Adder);
 		(void)x;
 		return 0;
 	}
@@ -163,7 +173,7 @@ bool TestInlineHook(std::string &error)
 	CHECK(result == 42, "hooked call did not return the original function's result");
 	CHECK(g_PreCalls == 1, "Pre handler did not run exactly once");
 	CHECK(g_PostCalls == 1, "Post handler did not run exactly once");
-	CHECK(g_LastOrigRet == 42, "Post handler did not see the original return value via SH_INLINE_ORIG_RET");
+	CHECK(g_LastOrigRet == 42, "Post handler did not see the original return value via SH_RESULT_ORIG_RET");
 
 	// Plugin C independently "found the same signature" and registers the
 	// exact same Pre handler again -- still must not create a second hook.
@@ -182,7 +192,7 @@ bool TestInlineHook(std::string &error)
 	CHECK(idOverride != 0, "override Pre handler failed to register");
 
 	int result3 = TargetAdd(100);
-	CHECK(result3 == 1234, "RETURN_SH_INLINE_VALUE(MRES_SUPERCEDE, ...) override was not honored");
+	CHECK(result3 == 1234, "RETURN_SH_VALUE(MRES_SUPERCEDE, ...) override was not honored");
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineAdd, addr, SH_STATIC(StaticPreOverride), false),
 		"failed to remove the override Pre handler");
 
@@ -198,7 +208,7 @@ bool TestInlineHook(std::string &error)
 	int result4 = TargetAdd(3);
 	CHECK(result4 == 44, "function did not return to its original, unhooked behavior after teardown");
 
-	// -------- member function: `this` via SH_INLINE_IFACEPTR --------
+	// -------- member function: `this` via SH_IFACEPTR --------
 	// volatile + calling through a raw pointer derived once, same reasoning
 	// as g_LastThis above: Adder::Add's definition is visible in this TU, so
 	// without this the optimizer can decide adder's storage is dead after
@@ -216,7 +226,7 @@ bool TestInlineHook(std::string &error)
 
 	int memberResult = pAdder->Add(5);
 	CHECK(memberResult == 15, "member-function call did not return the original result");
-	CHECK(g_LastThis == pAdder, "SH_INLINE_IFACEPTR did not return the real `this` pointer");
+	CHECK(g_LastThis == pAdder, "SH_IFACEPTR did not return the real `this` pointer");
 
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineMemberAdd, memberAddr, SH_STATIC(MemberDetour), false),
 		"failed to remove the member-function hook");

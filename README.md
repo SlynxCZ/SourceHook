@@ -102,21 +102,32 @@ the side. Only inline hooks' *implementation* (`sourcehook_inline.h`, which
 needs `safetyhook.hpp`) is a separate include, kept out of the dependency-free
 base header for anyone who only wants typed/manual hooks.
 
-All three styles also now share the same **SH_**-branded macro family for
-reading/returning results — `SH_IFACEPTR`/`RETURN_SH`/`RETURN_SH_VALUE`/
-`SET_SH_RESULT`/`SHRES_IGNORED`..`SHRES_SUPERCEDE` for typed/manual (vtable)
-hooks, `SH_INLINE_IFACEPTR`/`RETURN_SH_INLINE`/`RETURN_SH_INLINE_VALUE`/
-`SET_SH_INLINE_RESULT` for inline hooks. The old `META_*`/`MRES_*` names
-are kept as plain aliases for existing plugin code — nothing about their
-behavior changed, only which name is preferred going forward.
+All three styles also share **one** macro family — `SH_IFACEPTR`/
+`RETURN_SH`/`RETURN_SH_VALUE`/`SET_SH_RESULT`/`SH_RESULT_ORIG_RET`/
+`SHRES_IGNORED`..`SHRES_SUPERCEDE` — not two parallel sets. Including
+`sourcehook_inline.h` makes these same macros auto-detect at the call site
+whether they're running inside an inline-hook dispatch (checks a
+thread-local call-frame stack) or a typed/manual (vtable) hook, and route
+to the right implementation — a handler body never has to say which kind of
+hook it's in. The **only** place the hook style is visible at all is
+`SH_DECL_*`/`SH_ADD_*`/`SH_REMOVE_*` (`SH_DECL_INLINEHOOK*`/
+`SH_ADD_INLINEHOOK`/`SH_REMOVE_INLINEHOOK` vs. `SH_DECL_HOOK*`/
+`SH_ADD_HOOK`/`SH_REMOVE_HOOK` etc.) — decl/add/remove, nothing else. The
+old `META_*`/`MRES_*` names are kept as plain aliases for existing plugin
+code — nothing about their behavior changed, only which name is preferred
+going forward. (`SH_INLINE_ORIG_CALLED()` is the one inline-only helper
+with no vtable-hook equivalent to unify with, so it keeps its own name.)
 
 ## Inline hooks
 
 Handlers look exactly like a typed/manual hook's generated `Func()`
 override: a real function with the hooked function's own signature, not a
-context-object wrapper. `this` isn't part of the declared parameter list
-either (same as `SH_DECL_HOOK`/`SH_DECL_MANUALHOOK`) — get it via
-`SH_INLINE_IFACEPTR`, matching `META_IFACEPTR`'s ergonomics.
+context-object wrapper, using the **same** `SH_IFACEPTR`/`RETURN_SH`/
+`RETURN_SH_VALUE`/`SET_SH_RESULT` macros a vtable hook's handler already
+uses — see "Three hook styles, one header" above. `this` isn't part of the
+declared parameter list either (same as `SH_DECL_HOOK`/`SH_DECL_MANUALHOOK`)
+— get it via `SH_IFACEPTR`, exactly like `META_IFACEPTR`/`SH_IFACEPTR`
+already work for those.
 
 ```cpp
 #include "sourcehook_inline.h"
@@ -126,7 +137,7 @@ SH_DECL_INLINEHOOK1(MyHook, void, int, CBaseEntity *);
 
 int MyDetour(CBaseEntity *pEnt)
 {
-    RETURN_SH_INLINE_VALUE(MRES_SUPERCEDE, 1);
+    RETURN_SH_VALUE(MRES_SUPERCEDE, 1);
 }
 
 // non-virtual member function (thisclass = CBaseEntity):
@@ -134,8 +145,8 @@ SH_DECL_INLINEHOOK1(MyOtherHook, CBaseEntity, void, int);
 
 void MyOtherDetour(int x)
 {
-    CBaseEntity *pThis = SH_INLINE_IFACEPTR(CBaseEntity);
-    RETURN_SH_INLINE(MRES_IGNORED);
+    CBaseEntity *pThis = SH_IFACEPTR(CBaseEntity);
+    RETURN_SH(MRES_IGNORED);
 }
 
 // targetAddr is whatever your own signature scan resolved -- SourceHook
@@ -144,6 +155,15 @@ SH_ADD_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false /* pre */);
 SH_ADD_INLINEHOOK(MyOtherHook, otherAddr, SH_MEMBER(this, &MyClass::MyOtherDetour), true /* post */);
 SH_REMOVE_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false);
 ```
+
+Any translation unit that includes `sourcehook_inline.h` and uses these
+unified macros needs `SH_GLOB_SHPTR`/`SH_GLOB_PLUGPTR` (default:
+`g_SHPtr`/`g_PLID`) declared somewhere reachable, even for a file that only
+ever uses inline hooks — the macros' vtable-hook fallback branch still
+references them in the compiled code, just never *taken* at runtime. A
+real metamod:source plugin already gets this for free from
+`PLUGIN_EXPOSE()`; a standalone tool/test needs its own stand-in (see
+`test/testinlinehook.cpp`).
 
 If two different `SH_ADD_INLINEHOOK` calls resolve to the **same**
 `targetAddr` with the **same** declared signature — the "two plugins found
