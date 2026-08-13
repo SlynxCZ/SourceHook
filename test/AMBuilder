@@ -1,0 +1,62 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+import os
+
+for cxx in SHook.all_targets:
+  # Legacy SourceHook test suite, ported unmodified from metamod-source.
+  # Upstream's own test/AMBuilder only ever built this on Linux x86 (never
+  # Windows, never Linux x86_64 -- the x86_64 vtable hookmangen it would need
+  # only implements its GCC/Linux register-marshaling paths as
+  # `static_assert(false, ...)` stubs, see sourcehook_hookmangen_x86_64.cpp).
+  # We preserve that scope unmodified rather than taking on fixing an
+  # upstream gap that wasn't part of this port.
+  if cxx.target.platform == 'linux' and cxx.target.arch == 'x86':
+    binary = cxx.Program('test_sourcehook')
+    binary.compiler.defines += ['SOURCEHOOK_TESTS']
+    binary.compiler.cxxincludes += [builder.sourcePath]
+    if binary.compiler.version >= 'gcc-4.9':
+      binary.compiler.cxxflags += ['-fno-devirtualize']
+    if binary.compiler.version >= 'clang-2.9' or binary.compiler.version >= 'apple-clang-3.0':
+      binary.compiler.cxxflags += ['-Wno-null-dereference']
+
+    binary.sources += [
+      'main.cpp',
+      os.path.join('..', 'sourcehook.cpp'),
+      os.path.join('..', 'sourcehook_impl_chookmaninfo.cpp'),
+      os.path.join('..', 'sourcehook_impl_chookidman.cpp'),
+      os.path.join('..', 'sourcehook_impl_cproto.cpp'),
+      os.path.join('..', 'sourcehook_impl_cvfnptr.cpp'),
+      os.path.join('..', 'sourcehook_hookmangen.cpp'),
+      os.path.join('..', 'sourcehook_hookmangen_x86.cpp'),
+      'test1.cpp',
+      'test2.cpp',
+      'test3.cpp',
+      'test4.cpp',
+      'testbail.cpp',
+      'testbail2.cpp',
+      'testhookmangen.cpp',
+      'testlist.cpp',
+      'testmanual.cpp',
+      'testmulti.cpp',
+      'testoddthunks.cpp',
+      'testrecall.cpp',
+      'testreentr.cpp',
+      'testref.cpp',
+      'testrefret.cpp',
+      'testvphooks.cpp',
+    ]
+    builder.Add(binary)
+
+  # New inline-hook dispatch test (sourcehook_inline.h). Scoped to Linux
+  # x86_64 SysV for now -- see sourcehook_inline.h's file header for why.
+  if cxx.target.platform == 'linux' and cxx.target.arch == 'x86_64':
+    binary = cxx.Program('test_sourcehook_inline')
+    binary.compiler.cxxincludes += [builder.sourcePath]
+
+    binary.sources += [
+      'main_inline.cpp',
+      'testinlinehook.cpp',
+      os.path.join('..', 'sourcehook_impl_inline.cpp'),
+    ]
+    SHook.AddVendorSources(binary)
+    SHook.AddVendorIncludes(binary)
+    builder.Add(binary)

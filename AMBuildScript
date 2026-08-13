@@ -1,0 +1,171 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Copyright (C) 2026 Michal Přikryl (Slynx) / (˙·٠● S l y n x ●٠·˙)
+import os, sys
+
+class SourceHookConfig(object):
+  def __init__(self):
+    self.all_targets = []
+    self.binaries = []
+
+    if builder.options.targets:
+      target_archs = builder.options.targets.split(',')
+    else:
+      target_archs = ['x86_64']
+
+    for arch in target_archs:
+      try:
+        cxx = builder.DetectCxx(target_arch=arch)
+      except Exception as e:
+        if builder.options.targets:
+          raise
+        print('Skipping target {}: {}'.format(arch, e))
+        continue
+      self.all_targets.append(cxx)
+
+    if not self.all_targets:
+      raise Exception('No suitable C/C++ compiler was found.')
+
+  def configure(self):
+    for cxx in self.all_targets:
+      self.configure_cxx(cxx)
+
+  def configure_cxx(self, cxx):
+    if cxx.behavior == 'gcc':
+      cxx.cflags += [
+        '-pipe',
+        '-fno-strict-aliasing',
+        '-Wall',
+        '-Wno-uninitialized',
+        '-Wno-unused',
+        '-Wno-switch',
+        '-Wno-invalid-offsetof',
+        '-msse',
+        '-fPIC',
+      ]
+      cxx.cxxflags += [
+        '-std=c++20',
+        '-frtti',
+        '-fno-threadsafe-statics',
+        '-fvisibility=hidden',
+        '-fvisibility-inlines-hidden',
+        '-Wno-non-virtual-dtor',
+        '-Wno-overloaded-virtual',
+      ]
+      if cxx.family == 'gcc':
+        cxx.cflags += ['-mfpmath=sse']
+      if cxx.family == 'clang':
+        cxx.cxxflags += ['-Wno-implicit-exception-spec-mismatch']
+
+    elif cxx.like('msvc'):
+      if builder.options.debug == '1':
+        cxx.cflags += ['/MTd']
+        cxx.linkflags += ['/NODEFAULTLIB:libcmt']
+      else:
+        cxx.cflags += ['/MT']
+      cxx.defines += [
+        '_CRT_SECURE_NO_DEPRECATE',
+        '_CRT_SECURE_NO_WARNINGS',
+        '_CRT_NONSTDC_NO_DEPRECATE',
+      ]
+      cxx.cflags += [
+        '/W3',
+        '/Zi',
+        '/EHsc',
+        '/std:c++20',
+      ]
+      cxx.cxxflags += ['/TP']
+
+    # Optimization
+    if builder.options.opt == '1':
+      cxx.defines += ['NDEBUG']
+      if cxx.behavior == 'gcc':
+        cxx.cflags += ['-O3']
+      elif cxx.behavior == 'msvc':
+        cxx.cflags += ['/Ox', '/Zo']
+        cxx.linkflags += ['/OPT:ICF', '/OPT:REF']
+
+    # Debugging
+    if builder.options.debug == '1':
+      cxx.defines += ['DEBUG', '_DEBUG']
+      if cxx.behavior == 'gcc':
+        cxx.cflags += ['-g3']
+      elif cxx.behavior == 'msvc':
+        cxx.cflags += ['/Od', '/RTC1']
+
+    if cxx.behavior == 'gcc':
+      cxx.cflags += ['-fno-omit-frame-pointer']
+    elif cxx.behavior == 'msvc':
+      cxx.cflags += ['/Oy-']
+
+    # Platform-specifics
+    if cxx.target.platform == 'linux':
+      cxx.defines += ['_LINUX', 'LINUX', 'POSIX', '_FILE_OFFSET_BITS=64']
+    elif cxx.target.platform == 'windows':
+      cxx.defines += ['WIN32', '_WINDOWS']
+
+  def AddVendorIncludes(self, binary):
+    binary.compiler.cxxincludes += [
+      os.path.join(builder.sourcePath),
+      os.path.join(builder.sourcePath, 'vendor'),
+      os.path.join(builder.sourcePath, 'vendor', 'safetyhook'),
+      os.path.join(builder.sourcePath, 'vendor', 'tl'),
+      os.path.join(builder.sourcePath, 'vendor', 'zydis'),
+    ]
+    # Zydis.c uses angle-bracket #include <Zydis.h>, which only the plain
+    # (non-cxx) include path list satisfies for the C compilation unit.
+    binary.compiler.includes += [
+      os.path.join(builder.sourcePath, 'vendor', 'zydis'),
+    ]
+    binary.compiler.defines += ['ZYDIS_STATIC_BUILD']
+
+  def AddVendorSources(self, binary):
+    binary.sources += [
+      os.path.join(builder.sourcePath, 'vendor', 'safetyhook', 'safetyhook.cpp'),
+      os.path.join(builder.sourcePath, 'vendor', 'zydis', 'Zydis.c'),
+    ]
+
+  def Library(self, cxx, name):
+    binary = cxx.StaticLibrary(name)
+    return binary
+
+  def build(self):
+    for cxx in self.all_targets:
+      lib = self.Library(cxx, 'sourcehook')
+
+      lib.sources += [
+        'sourcehook.cpp',
+        'sourcehook_impl_chookidman.cpp',
+        'sourcehook_impl_chookmaninfo.cpp',
+        'sourcehook_impl_cproto.cpp',
+        'sourcehook_impl_cvfnptr.cpp',
+        'sourcehook_hookmangen.cpp',
+        'sourcehook_impl_inline.cpp',
+      ]
+
+      if cxx.target.arch == 'x86':
+        lib.sources += ['sourcehook_hookmangen_x86.cpp']
+      elif cxx.target.arch == 'x86_64' and cxx.target.platform != 'linux':
+        # Matches metamod-source's own core/AMBuilder: the x86_64 vtable
+        # hookmangen's GCC/Linux register-marshaling paths are
+        # static_assert(false, ...) stubs and it uses `xor` as an
+        # identifier (a reserved alternative token under GCC/Clang), so it
+        # isn't built on Linux x86_64 upstream either. Inline hooks
+        # (sourcehook_inline.h) don't depend on this file.
+        lib.sources += ['sourcehook_hookmangen_x86_64.cpp']
+
+      self.AddVendorSources(lib)
+      self.AddVendorIncludes(lib)
+
+      node = builder.Add(lib)
+      self.binaries += [node]
+
+SHook = SourceHookConfig()
+SHook.configure()
+SHook.build()
+
+BuildScripts = []
+if getattr(builder.options, 'enable_tests', False):
+  BuildScripts += ['test/AMBuilder']
+
+if BuildScripts:
+  builder.Build(BuildScripts, { 'SHook': SHook })

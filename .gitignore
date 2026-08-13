@@ -1,0 +1,13 @@
+build/
+build-*/
+objdir/
+cmake-build-*/
+.idea/
+.cmake/
+.vs/
+.vscode/
+*.o
+*.obj
+*.d
+generate/upstream_codegen/*.exe
+generate/upstream_codegen/*.bin
