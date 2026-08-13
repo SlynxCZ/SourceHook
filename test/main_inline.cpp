@@ -17,6 +17,7 @@
 #include <string>
 
 bool TestInlineHook(std::string &error);
+bool TestInlineHookMetaMacros(std::string &error);
 bool TestInlineHookConcurrency(std::string &error);
 
 int main()
@@ -28,6 +29,13 @@ int main()
 		return 1;
 	}
 	std::cout << "TestInlineHook passed" << std::endl;
+
+	if (!TestInlineHookMetaMacros(error))
+	{
+		std::cout << "TestInlineHookMetaMacros FAILED: " << error << std::endl;
+		return 1;
+	}
+	std::cout << "TestInlineHookMetaMacros passed" << std::endl;
 
 	if (!TestInlineHookConcurrency(error))
 	{

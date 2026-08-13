@@ -276,6 +276,77 @@ bool TestInlineHook(std::string &error)
 	return true;
 }
 
+// -------------------- META_* macro parity for inline hooks --------------------
+//
+// Exercises the macros added specifically so a handler doesn't need to know
+// or care whether it's attached to a typed/manual (vtable) hook or an
+// inline one: META_RESULT_STATUS/META_RESULT_PREVIOUS/META_RESULT_OVERRIDE_RET
+// (all auto-detecting aliases -- see sourcehook_inline.h's #undef/#define
+// block), plus the inline-specific SHINT_RETURN_INLINE_VALUE_NEWPARAMS
+// (no vtable-side auto-detected name is possible for this one -- see its
+// comment in sourcehook_inline.h for why).
+
+SH_DECL_INLINEHOOK1(TestInlineMeta, void, int, int);
+
+namespace
+{
+	int __attribute__((noinline)) TargetMeta(int x)
+	{
+		volatile int y = x * 2;
+		asm volatile(
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			::: "memory");
+		return y + 0;
+	}
+
+	META_RES g_SeenPrevious = MRES_IGNORED;
+	int g_SeenOverrideRet = -1;
+
+	// Runs first: overrides the return value, doesn't supersede -- the
+	// second handler below still gets to run.
+	int MetaPreFirst(int)
+	{
+		RETURN_META_VALUE(MRES_OVERRIDE, 100);
+	}
+
+	// Runs second: reads what the first handler already decided via the
+	// exact same META_RESULT_* names a vtable-hook handler would use, then
+	// supersedes with a NEWPARAMS call -- the real original run again, with
+	// a *different* argument than what this call actually received.
+	int MetaPreSecond(int x)
+	{
+		g_SeenPrevious = META_RESULT_PREVIOUS;
+		if (META_RESULT_STATUS >= MRES_OVERRIDE)
+			g_SeenOverrideRet = META_RESULT_OVERRIDE_RET(int);
+
+		SHINT_RETURN_INLINE_VALUE_NEWPARAMS(MRES_SUPERCEDE, TestInlineMeta, (x + 1000));
+	}
+}
+
+bool TestInlineHookMetaMacros(std::string &error)
+{
+	void *addr = reinterpret_cast<void *>(&TargetMeta);
+
+	int idFirst = SH_ADD_INLINEHOOK(TestInlineMeta, addr, SH_STATIC(MetaPreFirst), false);
+	CHECK(idFirst != 0, "failed to register the first Pre handler");
+	int idSecond = SH_ADD_INLINEHOOK(TestInlineMeta, addr, SH_STATIC(MetaPreSecond), false);
+	CHECK(idSecond != 0, "failed to register the second Pre handler");
+
+	int result = TargetMeta(5);
+
+	CHECK(g_SeenPrevious == MRES_OVERRIDE, "META_RESULT_PREVIOUS did not see the first handler's MRES_OVERRIDE");
+	CHECK(g_SeenOverrideRet == 100, "META_RESULT_OVERRIDE_RET did not see the first handler's override value");
+	// TargetMeta(1005) = 1005 * 2 = 2010 -- proves SHINT_RETURN_INLINE_VALUE_NEWPARAMS
+	// actually called through with (x + 1000), not the original x = 5.
+	CHECK(result == 2010, "SHINT_RETURN_INLINE_VALUE_NEWPARAMS did not call through with the modified argument");
+
+	CHECK(SH_REMOVE_INLINEHOOK(TestInlineMeta, addr, SH_STATIC(MetaPreFirst), false), "failed to remove the first Pre handler");
+	CHECK(SH_REMOVE_INLINEHOOK(TestInlineMeta, addr, SH_STATIC(MetaPreSecond), false), "failed to remove the second Pre handler");
+
+	return true;
+}
+
 // -------------------- concurrency stress test --------------------
 //
 // Reproduces, under real concurrent threads, the exact race the

@@ -134,6 +134,11 @@ namespace SourceHook
 		struct CInlineCallFrame
 		{
 			void *this_ = nullptr;         // nullptr if this hook's thisclass is void
+			void *target_addr = nullptr;   // the hooked address itself -- what
+			                                // SHINT_RETURN_INLINE_(VALUE_)NEWPARAMS
+			                                // (below) needs to reach back into
+			                                // SH_CALL's own machinery without the
+			                                // caller having to repeat targetAddr.
 			void *override_ret = nullptr;  // -> a Ret-sized slot (nullptr if Ret == void)
 			const void *orig_ret = nullptr; // -> a Ret-sized slot, valid only once the
 			                                // original has actually been called (Post,
@@ -524,6 +529,7 @@ namespace SourceHook
 
 				CInlineCallFrame frame;
 				frame.this_ = pThis;
+				frame.target_addr = m_TargetAddr;
 
 				if constexpr (std::is_void_v<Ret>)
 				{
@@ -709,8 +715,28 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 #define SH_INLINE_ORIG_CALLED() (::SourceHook::Impl::CurrentInlineFrame()->orig_ret != nullptr)
 
 // SHINT_INLINE_RESULT: the highest META_RES set so far for the current call
-// (by this handler or any earlier one). Mirrors META_RESULT_STATUS.
+// (by this handler or any earlier one). Doubles as both META_RESULT_STATUS
+// and META_RESULT_PREVIOUS for inline hooks (see SH_RESULT_STATUS/
+// SH_RESULT_PREVIOUS's inline overrides below): unlike the vtable hook loop,
+// which tracks "status so far" and "status before this handler" as two
+// separate fields, RunChain() only ever has the one running frame.status,
+// updated as each handler's own RETURN_SH_INLINE*/SET_SH_RESULT call runs --
+// so reading it from *within* a handler, before that handler has set its own
+// result, already gives exactly "the highest result any earlier handler
+// set," which is what META_RESULT_PREVIOUS means; reading it afterward (rare
+// in practice, once a handler already returned) gives "current," which is
+// what META_RESULT_STATUS means. Same value, same field, correct for both
+// by construction given the call order.
 #define SHINT_INLINE_RESULT() (::SourceHook::Impl::CurrentInlineFrame()->status)
+
+// SHINT_INLINE_OVERRIDE_RET(type): the override return value set so far by
+// an earlier handler this call (Pre or Post), cast to `type`. Mirrors
+// META_RESULT_OVERRIDE_RET. Only meaningful once some earlier handler has
+// actually set an override (SHINT_INLINE_RESULT() >= MRES_OVERRIDE) --
+// reads whatever's in the (Ret-sized, default-constructed at call start)
+// override slot otherwise, same "don't call this before it's meaningful"
+// contract as SHINT_INLINE_ORIG_RET/META_RESULT_ORIG_RET.
+#define SHINT_INLINE_OVERRIDE_RET(type) (*reinterpret_cast<const type *>(::SourceHook::Impl::CurrentInlineFrame()->override_ret))
 
 #define SHINT_SET_INLINE_RESULT(result) \
 	do { \
@@ -737,6 +763,64 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 			__shFrame->has_override = true; \
 		} \
 		return (value); \
+	} while (0)
+
+// SHINT_RETURN_INLINE_NEWPARAMS(result, hookname, newparams) /
+// SHINT_RETURN_INLINE_VALUE_NEWPARAMS(result, hookname, newparams): inline-
+// hook counterparts of RETURN_META_MNEWPARAMS/RETURN_META_VALUE_MNEWPARAMS
+// (sourcehook.h) -- "supersede this call, but instead of my own override
+// value, call the real original again with a *different* set of arguments,
+// and use whatever it returns". `hookname` is the same SH_DECL_INLINEHOOK*-
+// declared name SH_CALL/SH_ADD_INLINEHOOK already use; `newparams` is a
+// parenthesized argument list, e.g. (a, b, c) -- same textual convention as
+// *MNEWPARAMS's own `newparams` (this expands to `SH_CALL_INLINE3(...)
+// newparams`, i.e. "call this callable object with these arguments", same
+// as *MNEWPARAMS expands to "call this member-function-pointer with these
+// arguments").
+//
+// Deliberately simpler than the vtable-hook macros they mirror: those
+// restart the *entire* Pre/Post loop as a "recall" (SH_GLOB_SHPTR->
+// DoRecall()), so every OTHER handler registered on that same hook -- not
+// just this one -- also gets a chance to see the new-parameters call, only
+// continuing from *this* handler's position in the chain rather than
+// starting over from the first one. Inline hooks have no equivalent state
+// machine (RunChain() has nothing like SetupHookLoop's State_Recall_*
+// continuation, and naively re-invoking RunChain() from here would restart
+// the *whole* Pre list from its first handler, not continue from this one --
+// wrong semantics, not just a missing feature). What this does instead is
+// exactly SH_CALL's own contract: call straight through to the real
+// original with the new arguments, bypassing every registered handler
+// (including this one, again) for this one call, then supersede with that
+// result. Correct and sufficient for the common case -- a single handler
+// wanting to adjust an argument and let the real function run with it; a
+// plugin that specifically needs *other* plugins' handlers on the same
+// address to also observe the modified-parameters call needs the full
+// recall machinery this intentionally doesn't implement. Not unified with
+// RETURN_META_MNEWPARAMS's own name via the usual inline/vtable
+// auto-detection: that macro's body references a symbol
+// (__SoureceHook_FHM_GetRecallMFP##hookname) that SH_DECL_MANUALHOOK*
+// generates and SH_DECL_INLINEHOOK* does not, so a runtime-selected "both
+// branches must compile" version (the trick every other auto-detecting
+// macro in this file uses) isn't possible here -- a hookname declared only
+// via SH_DECL_INLINEHOOK* would fail to compile the vtable branch. Distinct
+// names instead, same spirit as SH_CALL_INLINE3 being its own macro rather
+// than trying to overload SH_CALL_MNEWPARAMS.
+#define SHINT_RETURN_INLINE_NEWPARAMS(result, hookname, newparams) \
+	do { \
+		SHINT_SET_INLINE_RESULT(result); \
+		auto *__shFrame = ::SourceHook::Impl::CurrentInlineFrame(); \
+		SH_CALL_INLINE3(hookname, __shFrame->target_addr, \
+			reinterpret_cast<typename decltype(SourceHookInlineDecl::hookname)::ThisClassT *>(__shFrame->this_)) newparams; \
+		SHINT_RETURN_INLINE(MRES_SUPERCEDE); \
+	} while (0)
+
+#define SHINT_RETURN_INLINE_VALUE_NEWPARAMS(result, hookname, newparams) \
+	do { \
+		SHINT_SET_INLINE_RESULT(result); \
+		auto *__shFrame = ::SourceHook::Impl::CurrentInlineFrame(); \
+		SHINT_RETURN_INLINE_VALUE(MRES_SUPERCEDE, \
+			SH_CALL_INLINE3(hookname, __shFrame->target_addr, \
+				reinterpret_cast<typename decltype(SourceHookInlineDecl::hookname)::ThisClassT *>(__shFrame->this_)) newparams); \
 	} while (0)
 
 // SH_DECL_INLINEHOOK0..N (the "declare" half) already came in transitively
@@ -793,6 +877,30 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 	(::SourceHook::Impl::InlineCallStack().empty() \
 		? *SourceHook::MacroRefHelpers<type>::GetOrigRet(SH_GLOB_SHPTR) \
 		: SHINT_INLINE_ORIG_RET(type))
+
+// Same auto-detection for the three remaining SH_RESULT_*/META_RESULT_*
+// accessors sourcehook.h defines (SH_RESULT_STATUS, SH_RESULT_PREVIOUS,
+// SH_RESULT_OVERRIDE_RET) -- closes the last gap where META_RESULT_STATUS/
+// META_RESULT_PREVIOUS/META_RESULT_OVERRIDE_RET (plain aliases of these,
+// see sourcehook.h) would have silently kept reading the vtable-hook-only
+// SH_GLOB_SHPTR-based value even from inside an inline hook handler.
+#undef SH_RESULT_STATUS
+#define SH_RESULT_STATUS \
+	(::SourceHook::Impl::InlineCallStack().empty() \
+		? SH_GLOB_SHPTR->GetStatus() \
+		: SHINT_INLINE_RESULT())
+
+#undef SH_RESULT_PREVIOUS
+#define SH_RESULT_PREVIOUS \
+	(::SourceHook::Impl::InlineCallStack().empty() \
+		? SH_GLOB_SHPTR->GetPrevRes() \
+		: SHINT_INLINE_RESULT())
+
+#undef SH_RESULT_OVERRIDE_RET
+#define SH_RESULT_OVERRIDE_RET(type) \
+	(::SourceHook::Impl::InlineCallStack().empty() \
+		? *SourceHook::MacroRefHelpers<type>::GetOverrideRet(SH_GLOB_SHPTR) \
+		: SHINT_INLINE_OVERRIDE_RET(type))
 
 // `hookname` is a value (SH_DECL_INLINEHOOK* declares a constexpr instance,
 // not just a type -- see generate/sourcehook_inline_decl.h) so SH_CALL can
