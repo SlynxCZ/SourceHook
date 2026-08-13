@@ -1,5 +1,5 @@
 /* ======== SourceHook ========
-* Copyright (C) 2026 Metamod:Source Development Team
+* Copyright (C) 2004-2026 Metamod:Source Development Team
 * No warranties of any kind
 *
 * License: zlib/libpng
@@ -8,19 +8,25 @@
 * ============================
 */
 
-// Exercises the inline-hook dispatch added in sourcehook_inline.h: two
-// separate registrations against the *same* target address (one static
-// Pre handler registered twice, standing in for "two plugins found the same
-// signature"; one member Post handler, standing in for "static or member
-// callback") must share exactly one safetyhook::InlineHook/dispatcher, run
-// in Pre-then-original-then-Post order, honor MRES_* override semantics, and
-// fully restore the original function once every handler is removed.
+// Exercises the inline-hook dispatch added in sourcehook_inline.h:
+//  - a free function (no `this`) hooked by two separate registrations
+//    against the *same* target address (one static Pre handler registered
+//    twice, standing in for "two plugins found the same signature"; one
+//    member Post handler, standing in for "static or member callback") --
+//    must share exactly one safetyhook::InlineHook/dispatcher, run in
+//    Pre-then-original-then-Post order, honor MRES_* override semantics via
+//    RETURN_SH_INLINE_VALUE, and fully restore the original function once
+//    every handler is removed.
+//  - a non-virtual member function (has a `this`), read back via
+//    SH_INLINE_IFACEPTR inside the handler.
 
 #include <string>
 
 #include "sourcehook_inline.h"
 
-SH_DECL_INLINEHOOK1(TestInlineAdd, int, int);
+// -------------------- free function (thisclass = void) --------------------
+
+SH_DECL_INLINEHOOK1(TestInlineAdd, void, int, int);
 
 namespace
 {
@@ -46,28 +52,90 @@ namespace
 	int g_PostCalls = 0;
 	int g_LastOrigRet = -1;
 
-	META_RES StaticPre(SourceHook::InlineHookContext<int, int> &ctx)
+	// Real signature -- just like SH_DECL_HOOK's generated Func() override.
+	int StaticPre(int x)
 	{
 		++g_PreCalls;
-		(void)ctx.Arg<0>();
-		return MRES_IGNORED;
+		(void)x;
+		return 0; // ignored: no RETURN_SH_INLINE* call means MRES_IGNORED,
+		          // same permissive default typed hooks already have.
 	}
 
-	META_RES StaticPreOverride(SourceHook::InlineHookContext<int, int> &ctx)
+	int StaticPreOverride(int)
 	{
-		ctx.SetOverrideRet(1234);
-		return MRES_SUPERCEDE;
+		RETURN_SH_INLINE_VALUE(MRES_SUPERCEDE, 1234);
 	}
 
 	struct FakePlugin
 	{
-		META_RES MemberPost(SourceHook::InlineHookContext<int, int> &ctx)
+		int MemberPost(int)
 		{
 			++g_PostCalls;
-			g_LastOrigRet = ctx.GetOrigRet();
-			return MRES_IGNORED;
+			// An earlier Pre handler may have SUPERCEDEd the call (see the
+			// override test below) -- SH_INLINE_ORIG_RET is only safe to
+			// read once the original actually ran.
+			if (SH_INLINE_ORIG_CALLED())
+				g_LastOrigRet = SH_INLINE_ORIG_RET(int);
+			return 0;
 		}
 	};
+}
+
+// ---------------- non-virtual member function (has `this`) ----------------
+
+namespace
+{
+	struct Adder
+	{
+		int base;
+		int __attribute__((noinline)) Add(int x)
+		{
+			volatile int y = base + x;
+			asm volatile(
+				"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+				"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+				::: "memory");
+			return y + 0;
+		}
+	};
+
+	// volatile is load-bearing here, not decoration: Adder::Add's actual
+	// definition is visible in this same translation unit, so without it the
+	// optimizer is free to conclude "calling Adder::Add can't touch
+	// g_LastThis" from Add's own (unrelated) body and cache/hoist reads of
+	// it across the call -- a real hooked function always lives in a
+	// separately-compiled binary the compiler has zero visibility into, so
+	// this can't happen for a real caller; it's purely an artifact of
+	// hooking a same-TU synthetic test target, same spirit as the nop sled
+	// on TargetAdd/Adder::Add above.
+	Adder *volatile g_LastThis = nullptr;
+
+	// &Adder::Add is a pointer-to-member-function, not a plain code address
+	// -- reinterpret_cast can't convert it directly. On the Itanium C++ ABI
+	// (GCC/Clang, which is all this repo targets), a non-virtual member
+	// function pointer is a two-word {address, adjustor} struct with
+	// adjustor == 0, so the first word is the real code address. This
+	// helper is purely test-support: a real caller resolves its target
+	// address via its own signature scan, never via &Class::Method.
+	template <typename MemFn>
+	void *MemberFuncAddr(MemFn mfp)
+	{
+		union { MemFn in; void *out[2]; } u{};
+		u.in = mfp;
+		return u.out[0];
+	}
+}
+
+SH_DECL_INLINEHOOK1(TestInlineMemberAdd, Adder, int, int);
+
+namespace
+{
+	int MemberDetour(int x)
+	{
+		g_LastThis = SH_INLINE_IFACEPTR(Adder);
+		(void)x;
+		return 0;
+	}
 }
 
 #define CHECK(cond, msg) \
@@ -95,7 +163,7 @@ bool TestInlineHook(std::string &error)
 	CHECK(result == 42, "hooked call did not return the original function's result");
 	CHECK(g_PreCalls == 1, "Pre handler did not run exactly once");
 	CHECK(g_PostCalls == 1, "Post handler did not run exactly once");
-	CHECK(g_LastOrigRet == 42, "Post handler did not see the original return value");
+	CHECK(g_LastOrigRet == 42, "Post handler did not see the original return value via SH_INLINE_ORIG_RET");
 
 	// Plugin C independently "found the same signature" and registers the
 	// exact same Pre handler again -- still must not create a second hook.
@@ -114,7 +182,7 @@ bool TestInlineHook(std::string &error)
 	CHECK(idOverride != 0, "override Pre handler failed to register");
 
 	int result3 = TargetAdd(100);
-	CHECK(result3 == 1234, "MRES_SUPERCEDE override return value was not honored");
+	CHECK(result3 == 1234, "RETURN_SH_INLINE_VALUE(MRES_SUPERCEDE, ...) override was not honored");
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineAdd, addr, SH_STATIC(StaticPreOverride), false),
 		"failed to remove the override Pre handler");
 
@@ -129,6 +197,29 @@ bool TestInlineHook(std::string &error)
 
 	int result4 = TargetAdd(3);
 	CHECK(result4 == 44, "function did not return to its original, unhooked behavior after teardown");
+
+	// -------- member function: `this` via SH_INLINE_IFACEPTR --------
+	// volatile + calling through a raw pointer derived once, same reasoning
+	// as g_LastThis above: Adder::Add's definition is visible in this TU, so
+	// without this the optimizer can decide adder's storage is dead after
+	// its "last" (as far as it can see) use and reuse/invalidate it before
+	// the CHECK below reads &adder again -- it has no way to know the call
+	// through pAdder actually runs MemberDetour instead, which captures and
+	// compares against that same address. Not a concern for a real target,
+	// which always lives in a separately-compiled binary the compiler can't
+	// see through at all.
+	volatile Adder adder{ 10 };
+	Adder *pAdder = const_cast<Adder *>(&adder);
+	void *memberAddr = MemberFuncAddr(&Adder::Add);
+	int idMember = SH_ADD_INLINEHOOK(TestInlineMemberAdd, memberAddr, SH_STATIC(MemberDetour), false);
+	CHECK(idMember != 0, "member-function hook failed to register");
+
+	int memberResult = pAdder->Add(5);
+	CHECK(memberResult == 15, "member-function call did not return the original result");
+	CHECK(g_LastThis == pAdder, "SH_INLINE_IFACEPTR did not return the real `this` pointer");
+
+	CHECK(SH_REMOVE_INLINEHOOK(TestInlineMemberAdd, memberAddr, SH_STATIC(MemberDetour), false),
+		"failed to remove the member-function hook");
 
 	return true;
 }

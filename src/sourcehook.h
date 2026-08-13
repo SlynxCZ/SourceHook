@@ -138,6 +138,15 @@ enum META_RES
 	MRES_SUPERCEDE		// skip real function; use my return value
 };
 
+// Canonical SH_-branded names for the four META_RES values, same status as
+// SH_IFACEPTR/RETURN_SH/RETURN_SH_VALUE/SET_SH_RESULT above -- MRES_* is
+// kept working for existing plugin code, SHRES_* is the preferred name for
+// new code (typed/manual *and* inline hooks alike, see sourcehook_inline.h).
+#define SHRES_IGNORED	MRES_IGNORED
+#define SHRES_HANDLED	MRES_HANDLED
+#define SHRES_OVERRIDE	MRES_OVERRIDE
+#define SHRES_SUPERCEDE	MRES_SUPERCEDE
+
 
 namespace SourceHook
 {
@@ -587,15 +596,31 @@ namespace SourceHook
 /************************************************************************/
 /* High level interface                                                 */
 /************************************************************************/
-#define META_RESULT_STATUS					SH_GLOB_SHPTR->GetStatus()
-#define META_RESULT_PREVIOUS				SH_GLOB_SHPTR->GetPrevRes()
-#define META_RESULT_ORIG_RET(type)			*SourceHook::MacroRefHelpers<type>::GetOrigRet(SH_GLOB_SHPTR)
-#define META_RESULT_OVERRIDE_RET(type)		*SourceHook::MacroRefHelpers<type>::GetOverrideRet(SH_GLOB_SHPTR)
-#define META_IFACEPTR(type)					reinterpret_cast<type*>(SH_GLOB_SHPTR->GetIfacePtr())
+// Canonical SH_-prefixed names (typed/manual vtable hooks) -- SH_IFACEPTR is
+// the direct counterpart of sourcehook_inline.h's own SH_IFACEPTR for inline
+// hooks, same naming convention across both hook categories. The META_*
+// names below are kept as plain aliases for existing plugin code; nothing
+// about their behavior changed, only which name is the "primary" one.
+#define SH_RESULT_STATUS					SH_GLOB_SHPTR->GetStatus()
+#define SH_RESULT_PREVIOUS					SH_GLOB_SHPTR->GetPrevRes()
+#define SH_RESULT_ORIG_RET(type)			*SourceHook::MacroRefHelpers<type>::GetOrigRet(SH_GLOB_SHPTR)
+#define SH_RESULT_OVERRIDE_RET(type)		*SourceHook::MacroRefHelpers<type>::GetOverrideRet(SH_GLOB_SHPTR)
+#define SH_IFACEPTR(type)					reinterpret_cast<type*>(SH_GLOB_SHPTR->GetIfacePtr())
 
-#define SET_META_RESULT(result)				SH_GLOB_SHPTR->SetRes(result)
-#define RETURN_META(result)					do { SET_META_RESULT(result); return; } while(0)
-#define RETURN_META_VALUE(result, value)	do { SET_META_RESULT(result); return (value); } while(0)
+#define SET_SH_RESULT(result)				SH_GLOB_SHPTR->SetRes(result)
+#define RETURN_SH(result)					do { SET_SH_RESULT(result); return; } while(0)
+#define RETURN_SH_VALUE(result, value)		do { SET_SH_RESULT(result); return (value); } while(0)
+
+// Deprecated aliases -- kept for existing plugin code, prefer the SH_* names above.
+#define META_RESULT_STATUS					SH_RESULT_STATUS
+#define META_RESULT_PREVIOUS				SH_RESULT_PREVIOUS
+#define META_RESULT_ORIG_RET(type)			SH_RESULT_ORIG_RET(type)
+#define META_RESULT_OVERRIDE_RET(type)		SH_RESULT_OVERRIDE_RET(type)
+#define META_IFACEPTR(type)					SH_IFACEPTR(type)
+
+#define SET_META_RESULT(result)				SET_SH_RESULT(result)
+#define RETURN_META(result)					RETURN_SH(result)
+#define RETURN_META_VALUE(result, value)	RETURN_SH_VALUE(result, value)
 
 
 template<class T>
@@ -4731,6 +4756,27 @@ SourceHook::CallClass<T> *SH_GET_CALLCLASS(T *p)
 	SH_DECL_MANUALEXTERN_void_vafmt(hookname, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20)
 
 
+
+//////////////////////////////////////////////////////////////////////////
+// SH_DECL_INLINEHOOK -- third hook style, for a raw non-virtual function
+// (e.g. found by a byte-signature scan) instead of a vtable slot. Only a
+// forward declaration is needed here (a type alias doesn't require a
+// complete type) -- the real SourceHook::Impl::CInlineDispatcher template
+// and SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK live in sourcehook_inline.h
+// (needs safetyhook.hpp, which this base header deliberately has no
+// dependency on), included separately by anyone who actually wants to use
+// inline hooks and not just, say, forward-declare one. See
+// sourcehook_inline.h's file header for full usage/rationale.
+namespace SourceHook
+{
+	namespace Impl
+	{
+		template <typename ThisClass, typename Ret, typename... Args>
+		class CInlineDispatcher;
+	}
+}
+
+#include "../generate/sourcehook_inline_decl.h"
 
 
 //////////////////////////////////////////////////////////////////////////

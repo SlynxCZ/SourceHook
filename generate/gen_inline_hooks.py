@@ -33,9 +33,15 @@ HEADER = """/* ======== SourceHook ========
 * Declares SH_DECL_INLINEHOOK0..{max_arity}, the inline-hook counterpart of
 * upstream's SH_DECL_MANUALHOOK0..20 (see sourcehook.h). Each macro declares
 * a SourceHookInlineDecl::<hookname> type carrying the
-* SourceHook::Impl::CInlineDispatcher<rettype, param1..N> specialization that
-* SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK (sourcehook_inline.h) dispatch
-* through for that hook name.
+* SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1..N>
+* specialization that SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK
+* (sourcehook_inline.h) dispatch through for that hook name.
+*
+* `thisclass` is `void` for a hooked function with no `this` (a real free
+* function), or the class type for a non-virtual member function -- see
+* sourcehook_inline.h's file header for why that's a separate template
+* parameter instead of Args...[0], and SH_INLINE_IFACEPTR for how to read it
+* back out inside a handler.
 * ============================
 */
 
@@ -49,8 +55,8 @@ FOOTER = "\n#endif //__SOURCEHOOK_INLINE_DECL_H__\n"
 
 def emit_macro(n):
   params = [f'param{i}' for i in range(1, n + 1)]
-  arg_list = ', '.join(['hookname', 'rettype'] + params)
-  template_args = ', '.join(['rettype'] + params)
+  arg_list = ', '.join(['hookname', 'thisclass', 'rettype'] + params)
+  template_args = ', '.join(['thisclass', 'rettype'] + params)
   lines = []
   lines.append(f'#define SH_DECL_INLINEHOOK{n}({arg_list}) \\')
   lines.append('\tnamespace SourceHookInlineDecl { \\')
