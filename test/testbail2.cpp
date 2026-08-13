@@ -1,7 +1,7 @@
 // TESTBAIL
 //  Different compilation unit
 
-#include "sourcehook.h"
+#include "sourcehook/sourcehook.h"
 #include "sourcehook_test.h"
 #include "testbail.h"
 

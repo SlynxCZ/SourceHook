@@ -1,10 +1,10 @@
 // This file is used for backwards compatibility testing
 // It allows us to test binary backwards compatibility by using an older include file HERE:
-#include "sourcehook.h"			// <-- here
+#include "sourcehook/sourcehook.h"			// <-- here
 // There. main.cpp which implements all of the following function is always usign sourcehook.h
 // and the up-to-date sourcehook_impl.h/sourcehook.cpp. The tests use this file however.
 // If the test needs an up-to-date version (like the recall test), it can simply
-// #include "sourcehook.h" before including this, thus overriding our decision.
+// #include "sourcehook/sourcehook.h" before including this, thus overriding our decision.
 
 
 SourceHook::ISourceHook *Test_Factory();

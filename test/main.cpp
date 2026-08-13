@@ -11,8 +11,8 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "sourcehook_impl.h"
-#include "sourcehook.h"
+#include "sourcehook/sourcehook_impl.h"
+#include "sourcehook/sourcehook.h"
 #include "sourcehook_hookmangen.h"
 
 using namespace std;

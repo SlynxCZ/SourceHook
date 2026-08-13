@@ -11,7 +11,7 @@
 #ifndef _INCLUDE_SH_TINYHASH_H_
 #define _INCLUDE_SH_TINYHASH_H_
 
-#include "sh_list.h"
+#include "sourcehook/sh_list.h"
 
 #define _T_INIT_HASH_SIZE	32
 

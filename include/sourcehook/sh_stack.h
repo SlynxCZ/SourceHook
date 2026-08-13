@@ -12,7 +12,7 @@
 #define __SH_STACK_H__
 
 #include <stddef.h>
-#include "sh_vector.h"
+#include "sourcehook/sh_vector.h"
 
 namespace SourceHook
 {

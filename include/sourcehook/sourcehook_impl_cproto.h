@@ -13,8 +13,8 @@
 
 #include <cstddef>
 
-#include "sourcehook.h"
-#include "sh_vector.h"
+#include "sourcehook/sourcehook.h"
+#include "sourcehook/sh_vector.h"
 
 namespace SourceHook
 {

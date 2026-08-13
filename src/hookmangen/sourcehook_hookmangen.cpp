@@ -18,7 +18,7 @@
 #include <cstdio>
 #include <cstdarg>							// we might need the address of vsnprintf
 
-#include "sourcehook_impl.h"
+#include "sourcehook/sourcehook_impl.h"
 #include "sourcehook_hookmangen.h"
 #if defined( PLATFORM_64BITS ) && !defined( _LINUX )
 #include "sourcehook_hookmangen_x86_64.h"
@@ -27,7 +27,7 @@ typedef SourceHook::Impl::x64GenContext SHGenContext;
 #include "sourcehook_hookmangen_x86.h"
 typedef SourceHook::Impl::GenContext SHGenContext;
 #endif
-#include "sh_memory.h"
+#include "sourcehook/sh_memory.h"
 
 #if SH_COMP == SH_COMP_MSVC
 # define GCC_ONLY(x)

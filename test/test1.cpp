@@ -2,7 +2,7 @@
 #include "sourcehook_test.h"
 #include "testevents.h"
 
-#include "sh_memory.h"
+#include "sourcehook/sh_memory.h"
 
 namespace
 {

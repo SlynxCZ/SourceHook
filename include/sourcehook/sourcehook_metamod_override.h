@@ -22,7 +22,7 @@
 // server's metamod build at all.
 //
 //   #include <ISmmPlugin.h>        // (or anything that pulls in sourcehook.h)
-//   #include "sourcehook_metamod_override.h"
+//   #include "sourcehook/sourcehook_metamod_override.h"
 //
 //   SH_DECL_HOOK1_void(SomeClass, SomeMethod, SH_NOATTRIB, 0, int);
 //
@@ -62,7 +62,7 @@
 #ifndef __SOURCEHOOK_METAMOD_OVERRIDE_H__
 #define __SOURCEHOOK_METAMOD_OVERRIDE_H__
 
-#include "sourcehook_impl.h"
+#include "sourcehook/sourcehook_impl.h"
 
 inline SourceHook::Impl::CSourceHookImpl g_SourceHookImpl;
 inline SourceHook::ISourceHook *g_pSourceHook = &g_SourceHookImpl;

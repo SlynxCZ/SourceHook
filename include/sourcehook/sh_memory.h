@@ -12,7 +12,7 @@
 #ifndef __SHINT_MEMORY_H__
 #define __SHINT_MEMORY_H__
 
-#include "sourcehook.h"
+#include "sourcehook/sourcehook.h"
 
 // Feb 17 / 2005:
 //  Unprotect now sets to readwrite
@@ -51,7 +51,7 @@
 # include <mach/mach_traps.h>
 #endif
 
-#include "sh_list.h"
+#include "sourcehook/sh_list.h"
 
 namespace SourceHook
 {

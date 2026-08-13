@@ -11,8 +11,8 @@
 #ifndef __SOURCEHOOK_IMPL_CHOOKMANINFO_H__
 #define __SOURCEHOOK_IMPL_CHOOKMANINFO_H__
 
-#include "sh_list.h"
-#include "sourcehook_impl_cproto.h"
+#include "sourcehook/sh_list.h"
+#include "sourcehook/sourcehook_impl_cproto.h"
 
 namespace SourceHook
 {

@@ -11,8 +11,8 @@
 #ifndef __SOURCEHOOK_PIBUILDER_H__
 #define __SOURCEHOOK_PIBUILDER_H__
 
-#include "sourcehook.h"
-#include "sh_vector.h"
+#include "sourcehook/sourcehook.h"
+#include "sourcehook/sh_vector.h"
 
 namespace SourceHook
 {

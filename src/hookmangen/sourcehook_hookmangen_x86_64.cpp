@@ -18,7 +18,7 @@
 #include <cstdio>
 #include <string>
 
-#include "sourcehook_impl.h"
+#include "sourcehook/sourcehook_impl.h"
 #include "sourcehook_hookmangen.h"
 #include "sourcehook_hookmangen_x86_64.h"
 #include "sourcehook_pibuilder.h"

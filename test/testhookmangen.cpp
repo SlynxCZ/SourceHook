@@ -1,10 +1,10 @@
 #include <string>
 #include <cstdlib>
-#include "sourcehook.h"
+#include "sourcehook/sourcehook.h"
 #include "sourcehook_test.h"
 #include "testevents.h"
-#include "sh_memory.h"
-#include "sh_pagealloc.h"
+#include "sourcehook/sh_memory.h"
+#include "sourcehook/sh_pagealloc.h"
 #include "sourcehook_pibuilder.h"
 
 // TESTHOOKMANGEN

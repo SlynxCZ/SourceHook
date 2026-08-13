@@ -1,8 +1,8 @@
 #include <string>
-#include "sh_list.h"
-#include "sh_stack.h"
-#include "sh_tinyhash.h"
-#include "sh_vector.h"
+#include "sourcehook/sh_list.h"
+#include "sourcehook/sh_stack.h"
+#include "sourcehook/sh_tinyhash.h"
+#include "sourcehook/sh_vector.h"
 #include "testevents.h"
 
 // TEST LIST

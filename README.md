@@ -37,15 +37,16 @@ relies on throughout. GCC ≥10 is untested but should work; adjust `CXX`/`CC`
 
 ## Layout
 
-Two-tier split: `public/` is the **one** directory a consumer ever needs on
+Two-tier split: `include/` is the **one** directory a consumer ever needs on
 its own include path; `src/` is this library's own implementation, which a
 consumer never touches directly (its own build already handles it via
 either sub-build convention below).
 
-- `public/` — everything `#include "sourcehook.h"` needs, transitively,
-  flat in one folder: `sourcehook.h` itself (where `SH_DECL_HOOK*`/
-  `SH_DECL_MANUALHOOK*`/`SH_DECL_INLINEHOOK*` — all three hook styles'
-  declare macros — live together, and which now `#include`s
+- `include/sourcehook/` — everything `#include "sourcehook/sourcehook.h"`
+  needs, transitively, namespaced under this one subfolder instead of
+  sitting flat in the include root: `sourcehook.h` itself (where
+  `SH_DECL_HOOK*`/`SH_DECL_MANUALHOOK*`/`SH_DECL_INLINEHOOK*` — all three
+  hook styles' declare macros — live together, and which now `#include`s
   `sourcehook_inline.h` itself too, see "Three hook styles, one header"
   below), `sourcehook_inline.h`, `sourcehook_impl*.h`,
   `sourcehook_impl_inline.h`, `sourcehook_metamod_override.h` (opt a
@@ -60,7 +61,7 @@ either sub-build convention below).
   (`sourcehook_hookmangen*`, plus its own private `sh_asm*.h`/
   `sourcehook_pibuilder.h`) that `SH_DECL_HOOK`/`SH_DECL_MANUALHOOK` need at
   runtime. Fully private to this library's own build — a normal consumer
-  never needs this on its include path, only `public/`. See "Known
+  never needs this on its include path, only `include/`. See "Known
   upstream gap" below for its Linux x86_64 status.
 - `vendor/` — `safetyhook` (the inline-hook engine), `zydis` (safetyhook's
   disassembler dependency), `tl::expected` (safetyhook's error type). Copied
@@ -70,9 +71,10 @@ either sub-build convention below).
   `testinlinehook.cpp` for the new inline-hook dispatch.
 - `generate/` — `gen_inline_hooks.py` generates `sourcehook_inline_decl.h`
   (the `SH_DECL_INLINEHOOK0..20` macro family, `#include`d from
-  `public/sourcehook.h`). `generate/upstream_codegen/` is metamod-source's
-  own original `sourcehook.hxx` + `shworker` codegen tool that produces
-  `sourcehook.h`, kept for provenance; this repo doesn't run it.
+  `include/sourcehook/sourcehook.h`). `generate/upstream_codegen/` is
+  metamod-source's own original `sourcehook.hxx` + `shworker` codegen tool
+  that produces `sourcehook.h`, kept for provenance; this repo doesn't run
+  it.
 
 ## Using this from another project
 
@@ -81,7 +83,7 @@ listing/globbing its sources yourself:
 
 - **CMake**: `add_subdirectory(vendor/sourcehook)` then
   `target_link_libraries(yourtarget sourcehook)` — its `PUBLIC` include
-  dirs (`public/` and, transitively, `vendor/safetyhook`'s headers) come
+  dirs (`include/` and, transitively, `vendor/safetyhook`'s headers) come
   along automatically, nothing else to configure. Set
   `SOURCEHOOK_BUILD_TESTS OFF` first if you don't want its own test suite
   pulled into your build.
@@ -95,16 +97,16 @@ listing/globbing its sources yourself:
   binary.compiler.linkflags += [SourceHookLib['binaries_by_arch'][cxx.target.arch]]
   SourceHookLib['config'].AddPublicIncludes(binary)
   ```
-  `AddPublicIncludes()` adds every include path a consumer of `sourcehook.h`
-  needs in one call (computed from *this* repo's own `builder.sourcePath`)
-  — you never hand-list `public/`/`vendor/safetyhook`/`vendor/tl`/
-  `vendor/zydis` yourself, and it keeps working if this repo's own internal
-  layout ever changes again. `SourceHookBundleVendor=False` skips compiling
-  `vendor/safetyhook`/`vendor/zydis` into `libsourcehook` itself (headers
-  are still added to the include path either way) — set it if your own
-  project already compiles its own copies of those two, to avoid
-  duplicate-symbol link errors from two static libraries both containing
-  the same object code.
+  `AddPublicIncludes()` adds every include path a consumer of
+  `sourcehook/sourcehook.h` needs in one call (computed from *this* repo's
+  own `builder.sourcePath`) — you never hand-list `include/`/
+  `vendor/safetyhook`/`vendor/tl`/`vendor/zydis` yourself, and it keeps
+  working if this repo's own internal layout ever changes again.
+  `SourceHookBundleVendor=False` skips compiling `vendor/safetyhook`/
+  `vendor/zydis` into `libsourcehook` itself (headers are still added to
+  the include path either way) — set it if your own project already
+  compiles its own copies of those two, to avoid duplicate-symbol link
+  errors from two static libraries both containing the same object code.
 
 See `InventoryManager_mm_es`'s `sourcehook_inline` branch for both of these
 in real use, including `sourcehook_metamod_override.h` (below).
@@ -112,15 +114,15 @@ in real use, including `sourcehook_metamod_override.h` (below).
 ## Three hook styles, one header
 
 `SH_DECL_HOOK*`, `SH_DECL_MANUALHOOK*`, and `SH_DECL_INLINEHOOK*` are all
-declared together in `public/sourcehook.h` — inline hooks are a third
-option alongside the two vtable-hook styles, not a separate thing bolted on
-the side. `sourcehook.h` also `#include`s inline hooks' own *implementation*
+declared together in `sourcehook.h` — inline hooks are a third option
+alongside the two vtable-hook styles, not a separate thing bolted on the
+side. `sourcehook.h` also `#include`s inline hooks' own *implementation*
 (`sourcehook_inline.h`) itself, at the bottom of the file — a single
-`#include "sourcehook.h"` is enough for all three hook styles, nothing else
-to remember. This does mean `sourcehook.h` now needs `safetyhook.hpp` (+
-`vendor/tl`/`vendor/zydis`) on the include path unconditionally; `#define
-SOURCEHOOK_NO_INLINE` before including it to opt back out and get the old
-dependency-free, typed/manual-only header.
+`#include "sourcehook/sourcehook.h"` is enough for all three hook styles,
+nothing else to remember. This does mean `sourcehook.h` now needs
+`safetyhook.hpp` (+ `vendor/tl`/`vendor/zydis`) on the include path
+unconditionally; `#define SOURCEHOOK_NO_INLINE` before including it to opt
+back out and get the old dependency-free, typed/manual-only header.
 
 All three styles also share **one** macro family — `SH_IFACEPTR`/
 `RETURN_SH`/`RETURN_SH_VALUE`/`SET_SH_RESULT`/`SH_RESULT_ORIG_RET`/
@@ -150,7 +152,7 @@ declared parameter list either (same as `SH_DECL_HOOK`/`SH_DECL_MANUALHOOK`)
 already work for those.
 
 ```cpp
-#include "sourcehook.h"   // sourcehook_inline.h comes along automatically
+#include "sourcehook/sourcehook.h"   // sourcehook_inline.h comes along automatically
 
 // free function, no `this` (thisclass = void):
 SH_DECL_INLINEHOOK1(MyHook, void, int, CBaseEntity *);
@@ -176,7 +178,7 @@ SH_ADD_INLINEHOOK(MyOtherHook, otherAddr, SH_MEMBER(this, &MyClass::MyOtherDetou
 SH_REMOVE_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false);
 ```
 
-Any translation unit that includes `sourcehook.h` and uses these
+Any translation unit that includes `sourcehook/sourcehook.h` and uses these
 unified macros needs `SH_GLOB_SHPTR`/`SH_GLOB_PLUGPTR` (default:
 `g_SHPtr`/`g_PLID`) declared somewhere reachable, even for a file that only
 ever uses inline hooks — the macros' vtable-hook fallback branch still
@@ -205,14 +207,14 @@ function and a member function target).
 A metamod:source plugin normally shares one SourceHook engine instance
 across the whole server (`PLUGIN_SAVEVARS()` points `g_SHPtr`/`g_PLID` at
 whatever `ISourceHook` `metamod.so` itself was built with). Including
-`sourcehook_metamod_override.h` (in `public/`) after `<ISmmPlugin.h>` opts a
+`sourcehook/sourcehook_metamod_override.h` after `<ISmmPlugin.h>` opts a
 plugin out of that and onto its own private, plugin-owned instance of
 *this* SourceHook instead — e.g. to get `SH_DECL_INLINEHOOK` support
 without depending on the target server's metamod build at all:
 
 ```cpp
 #include <ISmmPlugin.h>
-#include "sourcehook_metamod_override.h"
+#include "sourcehook/sourcehook_metamod_override.h"
 ```
 ```cpp
 bool MyPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)

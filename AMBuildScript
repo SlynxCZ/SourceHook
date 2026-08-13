@@ -19,11 +19,12 @@
 #      SourceHookLib['config'].AddPublicIncludes(binary)
 #
 #    AddPublicIncludes() is the point: it adds every include path a consumer
-#    of sourcehook.h needs (public/ + vendor/{safetyhook,tl,zydis}) in one
-#    call, computed from *this* repo's own builder.sourcePath -- so a caller
-#    never has to hand-list sourcehook's internal folder layout itself (and
-#    re-break every time that layout changes, like it just did going from
-#    src/{core,hookmangen,inline,util} to public/ + src/hookmangen).
+#    of "sourcehook/sourcehook.h" needs (include/ + vendor/{safetyhook,tl,
+#    zydis}) in one call, computed from *this* repo's own builder.sourcePath
+#    -- so a caller never has to hand-list sourcehook's internal folder
+#    layout itself (and re-break every time that layout changes, like it
+#    just did going from src/{core,hookmangen,inline,util} to
+#    include/sourcehook/ + src/hookmangen).
 #
 #    SourceHookBundleVendor=False skips compiling vendor/safetyhook and
 #    vendor/zydis into libsourcehook (their headers are still added to the
@@ -139,17 +140,18 @@ class SourceHookConfig(object):
       cxx.defines += ['WIN32', '_WINDOWS']
 
   def AddPublicIncludes(self, binary):
-    # public/ is the ONE directory a consumer needs: sourcehook.h (which
+    # include/ is the ONE directory a consumer needs: sourcehook.h (which
     # pulls in sourcehook_inline.h itself, see its file header) and
     # everything it transitively needs (sourcehook_impl*.h, sh_*.h,
-    # FastDelegate.h) all live there flat, resolved by bare filename.
-    # vendor/{safetyhook,tl,zydis} are needed too since sourcehook_inline.h
-    # needs safetyhook.hpp. Call this on any binary that #includes
-    # sourcehook.h -- this library's own sources and any downstream
-    # consumer alike (see this file's own header comment for the
+    # FastDelegate.h) live namespaced under include/sourcehook/, so a
+    # consumer writes #include "sourcehook/sourcehook.h". vendor/
+    # {safetyhook,tl,zydis} are needed too since sourcehook_inline.h needs
+    # safetyhook.hpp. Call this on any binary that #includes
+    # "sourcehook/sourcehook.h" -- this library's own sources and any
+    # downstream consumer alike (see this file's own header comment for the
     # SourceHookLib['config'].AddPublicIncludes(binary) sub-build usage).
     binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath, 'public'),
+      os.path.join(builder.sourcePath, 'include'),
       os.path.join(builder.sourcePath, 'vendor'),
       os.path.join(builder.sourcePath, 'vendor', 'safetyhook'),
       os.path.join(builder.sourcePath, 'vendor', 'tl'),

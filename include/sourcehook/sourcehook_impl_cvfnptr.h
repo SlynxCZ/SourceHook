@@ -11,12 +11,12 @@
 #ifndef __SOURCEHOOK_IMPL_CVFNPTR_H__
 #define __SOURCEHOOK_IMPL_CVFNPTR_H__
 
-#include "sh_list.h"
-#include "sh_memory.h"
-#include "sh_pagealloc.h"
-#include "sourcehook_impl_cleanuptask.h"
-#include "sourcehook_impl_chookmaninfo.h"
-#include "sourcehook_impl_ciface.h"
+#include "sourcehook/sh_list.h"
+#include "sourcehook/sh_memory.h"
+#include "sourcehook/sh_pagealloc.h"
+#include "sourcehook/sourcehook_impl_cleanuptask.h"
+#include "sourcehook/sourcehook_impl_chookmaninfo.h"
+#include "sourcehook/sourcehook_impl_ciface.h"
 
 namespace SourceHook
 {
