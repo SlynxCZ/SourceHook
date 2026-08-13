@@ -19,10 +19,10 @@ set(SOURCEHOOK_SOURCES
     src/core/sourcehook.cpp
     src/core/sourcehook_impl_chookidman.cpp
     src/core/sourcehook_impl_chookmaninfo.cpp
+    src/core/sourcehook_impl_cinline.cpp
     src/core/sourcehook_impl_cproto.cpp
     src/core/sourcehook_impl_cvfnptr.cpp
     src/hookmangen/sourcehook_hookmangen.cpp
-    src/inline/sourcehook_impl_inline.cpp
     vendor/safetyhook/safetyhook.cpp
     vendor/zydis/Zydis.c
 )
