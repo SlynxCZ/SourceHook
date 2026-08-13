@@ -138,8 +138,8 @@
 	*(reinterpret_cast<void**>(&(mfp)) + 1) = 0
 #endif
 
-#include "sourcehook/sh_memfuncinfo.h"
-#include "sourcehook/FastDelegate.h"
+#include "sh_memfuncinfo.h"
+#include "FastDelegate.h"
 
 // Good old metamod!
 
@@ -5031,7 +5031,7 @@ namespace SourceHook
 // pass -DSOURCEHOOK_NO_INLINE (or #define it before this #include) to opt
 // back out and get the old dependency-free base header.
 #ifndef SOURCEHOOK_NO_INLINE
-#include "sourcehook/sourcehook_inline.h"
+#include "sourcehook_inline.h"
 #endif
 
 #endif

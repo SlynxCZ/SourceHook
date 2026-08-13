@@ -12,12 +12,12 @@
 #ifndef __SOURCEHOOK_IMPL_H__
 #define __SOURCEHOOK_IMPL_H__
 
-#include "sourcehook/sourcehook.h"
-#include "sourcehook/sh_memory.h"
-#include "sourcehook/sh_list.h"
-#include "sourcehook/sh_vector.h"
-#include "sourcehook/sh_tinyhash.h"
-#include "sourcehook/sh_stack.h"
+#include "sourcehook.h"
+#include "sh_memory.h"
+#include "sh_list.h"
+#include "sh_vector.h"
+#include "sh_tinyhash.h"
+#include "sh_stack.h"
 
 /*
 
@@ -173,12 +173,12 @@ New SH_CALL
 	the original function. Everything works fine. This works even for VP hooks.
 */
 
-#include "sourcehook/sourcehook_impl_cproto.h"
-#include "sourcehook/sourcehook_impl_chookmaninfo.h"
-#include "sourcehook/sourcehook_impl_chook.h"
-#include "sourcehook/sourcehook_impl_ciface.h"
-#include "sourcehook/sourcehook_impl_cvfnptr.h"
-#include "sourcehook/sourcehook_impl_chookidman.h"
+#include "sourcehook_impl_cproto.h"
+#include "sourcehook_impl_chookmaninfo.h"
+#include "sourcehook_impl_chook.h"
+#include "sourcehook_impl_ciface.h"
+#include "sourcehook_impl_cvfnptr.h"
+#include "sourcehook_impl_chookidman.h"
 #include <cstdio>
 #include <stdarg.h>
 

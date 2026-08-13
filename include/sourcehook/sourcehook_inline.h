@@ -113,9 +113,9 @@
 #include <utility>
 #include <vector>
 
-#include "sourcehook/sourcehook.h"
-#include "sourcehook/FastDelegate.h"
-#include "sourcehook/sourcehook_impl_inline.h"
+#include "sourcehook.h"
+#include "FastDelegate.h"
+#include "sourcehook_impl_inline.h"
 #include "safetyhook.hpp"
 
 namespace SourceHook

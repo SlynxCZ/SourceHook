@@ -22,7 +22,7 @@
 // server's metamod build at all.
 //
 //   #include <ISmmPlugin.h>        // (or anything that pulls in sourcehook.h)
-//   #include "sourcehook/sourcehook_metamod_override.h"
+//   #include "sourcehook_metamod_override.h"
 //
 //   SH_DECL_HOOK1_void(SomeClass, SomeMethod, SH_NOATTRIB, 0, int);
 //
@@ -62,7 +62,17 @@
 #ifndef __SOURCEHOOK_METAMOD_OVERRIDE_H__
 #define __SOURCEHOOK_METAMOD_OVERRIDE_H__
 
-#include "sourcehook/sourcehook_impl.h"
+// Bare, not "sourcehook/sourcehook_impl.h" -- this file already lives
+// inside include/sourcehook/ itself, so a bare include resolves via the
+// "search the includer's own directory first" rule, straight to our own
+// sibling file, with no include-search-path involved at all. The qualified
+// spelling is genuinely ambiguous for a real metamod:source plugin: its
+// build also has metamod-source's own core/ on the include path (for
+// <ISmmPlugin.h> etc.), which contains its own core/sourcehook/ -- so
+// "sourcehook/sourcehook_impl.h" can resolve to *metamod's* copy instead of
+// this one, depending on -I ordering, silently pulling in metamod's own
+// (older) CSourceHookImpl instead of this fork's.
+#include "sourcehook_impl.h"
 
 inline SourceHook::Impl::CSourceHookImpl g_SourceHookImpl;
 inline SourceHook::ISourceHook *g_pSourceHook = &g_SourceHookImpl;
