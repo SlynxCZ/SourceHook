@@ -20,11 +20,16 @@
 #
 #    AddPublicIncludes() is the point: it adds every include path a consumer
 #    of "sourcehook/sourcehook.h" needs (include/ + vendor/{safetyhook,tl,
-#    zydis}) in one call, computed from *this* repo's own builder.sourcePath
-#    -- so a caller never has to hand-list sourcehook's internal folder
-#    layout itself (and re-break every time that layout changes, like it
-#    just did going from src/{core,hookmangen,inline,util} to
-#    include/sourcehook/ + src/hookmangen).
+#    zydis}) in one call, computed from *this* repo's own directory (snapshot
+#    of builder.currentSourcePath taken in SourceHookConfig.__init__, while
+#    this script is still the currently-executing context -- reading
+#    builder.currentSourcePath directly from inside AddPublicIncludes() would
+#    instead pick up whatever context happens to be running when the caller
+#    actually calls it, e.g. the calling project's own directory) -- so a
+#    caller never has to hand-list sourcehook's internal folder layout
+#    itself (and re-break every time that layout changes, like it just did
+#    going from src/{core,hookmangen,inline,util} to include/sourcehook/ +
+#    src/hookmangen).
 #
 #    SourceHookBundleVendor=False skips compiling vendor/safetyhook and
 #    vendor/zydis into libsourcehook (their headers are still added to the
@@ -39,6 +44,17 @@ SourceHookBundleVendor = globals().get('SourceHookBundleVendor', True)
 
 class SourceHookConfig(object):
   def __init__(self):
+    # Snapshot *now*, while this repo's own AMBuildScript is still the
+    # currently-executing context -- builder.currentSourcePath is a live
+    # attribute on the single shared `builder` object that ambuild2 mutates
+    # as it walks in and out of each BuildScript it evaluates, not something
+    # tied to where a function was *defined*. Read it lazily from inside
+    # AddPublicIncludes()/etc. instead of here, and by the time those run
+    # (e.g. called from a *different* project's own AMBuildScript, as a
+    # sub-build) it silently points at that caller's own directory instead
+    # of this repo's -- exactly the bug this snapshot avoids.
+    self.sourcePath = builder.currentSourcePath
+
     self.all_targets = []
     self.binaries = []
     self.binaries_by_arch = {}
@@ -151,16 +167,16 @@ class SourceHookConfig(object):
     # downstream consumer alike (see this file's own header comment for the
     # SourceHookLib['config'].AddPublicIncludes(binary) sub-build usage).
     binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath, 'include'),
-      os.path.join(builder.sourcePath, 'vendor'),
-      os.path.join(builder.sourcePath, 'vendor', 'safetyhook'),
-      os.path.join(builder.sourcePath, 'vendor', 'tl'),
-      os.path.join(builder.sourcePath, 'vendor', 'zydis'),
+      os.path.join(self.sourcePath, 'include'),
+      os.path.join(self.sourcePath, 'vendor'),
+      os.path.join(self.sourcePath, 'vendor', 'safetyhook'),
+      os.path.join(self.sourcePath, 'vendor', 'tl'),
+      os.path.join(self.sourcePath, 'vendor', 'zydis'),
     ]
     # Zydis.c uses angle-bracket #include <Zydis.h>, which only the plain
     # (non-cxx) include path list satisfies for the C compilation unit.
     binary.compiler.includes += [
-      os.path.join(builder.sourcePath, 'vendor', 'zydis'),
+      os.path.join(self.sourcePath, 'vendor', 'zydis'),
     ]
     binary.compiler.defines += ['ZYDIS_STATIC_BUILD']
 
@@ -171,13 +187,13 @@ class SourceHookConfig(object):
     # like the legacy test suite, directly #include) those internals -- a
     # normal downstream consumer never needs this, only AddPublicIncludes.
     binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath, 'src', 'hookmangen'),
+      os.path.join(self.sourcePath, 'src', 'hookmangen'),
     ]
 
   def AddVendorSources(self, binary):
     binary.sources += [
-      os.path.join(builder.sourcePath, 'vendor', 'safetyhook', 'safetyhook.cpp'),
-      os.path.join(builder.sourcePath, 'vendor', 'zydis', 'Zydis.c'),
+      os.path.join(self.sourcePath, 'vendor', 'safetyhook', 'safetyhook.cpp'),
+      os.path.join(self.sourcePath, 'vendor', 'zydis', 'Zydis.c'),
     ]
 
   def Library(self, cxx, name):
