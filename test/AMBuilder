@@ -12,7 +12,11 @@ for cxx in SHook.all_targets:
   if cxx.target.platform == 'linux' and cxx.target.arch == 'x86':
     binary = cxx.Program('test_sourcehook')
     binary.compiler.defines += ['SOURCEHOOK_TESTS']
-    binary.compiler.cxxincludes += [os.path.join(builder.sourcePath, 'src')]
+    binary.compiler.cxxincludes += [
+      os.path.join(builder.sourcePath, 'src', 'core'),
+      os.path.join(builder.sourcePath, 'src', 'hookmangen'),
+      os.path.join(builder.sourcePath, 'src', 'util'),
+    ]
     if binary.compiler.version >= 'gcc-4.9':
       binary.compiler.cxxflags += ['-fno-devirtualize']
     if binary.compiler.version >= 'clang-2.9' or binary.compiler.version >= 'apple-clang-3.0':
@@ -20,13 +24,13 @@ for cxx in SHook.all_targets:
 
     binary.sources += [
       'main.cpp',
-      os.path.join('..', 'src', 'sourcehook.cpp'),
-      os.path.join('..', 'src', 'sourcehook_impl_chookmaninfo.cpp'),
-      os.path.join('..', 'src', 'sourcehook_impl_chookidman.cpp'),
-      os.path.join('..', 'src', 'sourcehook_impl_cproto.cpp'),
-      os.path.join('..', 'src', 'sourcehook_impl_cvfnptr.cpp'),
-      os.path.join('..', 'src', 'sourcehook_hookmangen.cpp'),
-      os.path.join('..', 'src', 'sourcehook_hookmangen_x86.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_chookmaninfo.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_chookidman.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_cproto.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_cvfnptr.cpp'),
+      os.path.join('..', 'src', 'hookmangen', 'sourcehook_hookmangen.cpp'),
+      os.path.join('..', 'src', 'hookmangen', 'sourcehook_hookmangen_x86.cpp'),
       'test1.cpp',
       'test2.cpp',
       'test3.cpp',
@@ -50,12 +54,16 @@ for cxx in SHook.all_targets:
   # x86_64 SysV for now -- see sourcehook_inline.h's file header for why.
   if cxx.target.platform == 'linux' and cxx.target.arch == 'x86_64':
     binary = cxx.Program('test_sourcehook_inline')
-    binary.compiler.cxxincludes += [os.path.join(builder.sourcePath, 'src')]
+    binary.compiler.cxxincludes += [
+      os.path.join(builder.sourcePath, 'src', 'core'),
+      os.path.join(builder.sourcePath, 'src', 'inline'),
+      os.path.join(builder.sourcePath, 'src', 'util'),
+    ]
 
     binary.sources += [
       'main_inline.cpp',
       'testinlinehook.cpp',
-      os.path.join('..', 'src', 'sourcehook_impl_inline.cpp'),
+      os.path.join('..', 'src', 'inline', 'sourcehook_impl_inline.cpp'),
     ]
     SHook.AddVendorSources(binary)
     SHook.AddVendorIncludes(binary)

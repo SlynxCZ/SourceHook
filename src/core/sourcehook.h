@@ -4776,7 +4776,7 @@ namespace SourceHook
 	}
 }
 
-#include "../generate/sourcehook_inline_decl.h"
+#include "../../generate/sourcehook_inline_decl.h"
 
 
 //////////////////////////////////////////////////////////////////////////

@@ -131,8 +131,13 @@ class SourceHookConfig(object):
       cxx.defines += ['WIN32', '_WINDOWS']
 
   def AddVendorIncludes(self, binary):
+    # src/{core,hookmangen,inline,util} cross-include each other by bare
+    # filename, so all four need to be on the search path.
     binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath, 'src'),
+      os.path.join(builder.sourcePath, 'src', 'core'),
+      os.path.join(builder.sourcePath, 'src', 'hookmangen'),
+      os.path.join(builder.sourcePath, 'src', 'inline'),
+      os.path.join(builder.sourcePath, 'src', 'util'),
       os.path.join(builder.sourcePath, 'vendor'),
       os.path.join(builder.sourcePath, 'vendor', 'safetyhook'),
       os.path.join(builder.sourcePath, 'vendor', 'tl'),
@@ -160,17 +165,17 @@ class SourceHookConfig(object):
       lib = self.Library(cxx, 'sourcehook')
 
       lib.sources += [
-        os.path.join('src', 'sourcehook.cpp'),
-        os.path.join('src', 'sourcehook_impl_chookidman.cpp'),
-        os.path.join('src', 'sourcehook_impl_chookmaninfo.cpp'),
-        os.path.join('src', 'sourcehook_impl_cproto.cpp'),
-        os.path.join('src', 'sourcehook_impl_cvfnptr.cpp'),
-        os.path.join('src', 'sourcehook_hookmangen.cpp'),
-        os.path.join('src', 'sourcehook_impl_inline.cpp'),
+        os.path.join('src', 'core', 'sourcehook.cpp'),
+        os.path.join('src', 'core', 'sourcehook_impl_chookidman.cpp'),
+        os.path.join('src', 'core', 'sourcehook_impl_chookmaninfo.cpp'),
+        os.path.join('src', 'core', 'sourcehook_impl_cproto.cpp'),
+        os.path.join('src', 'core', 'sourcehook_impl_cvfnptr.cpp'),
+        os.path.join('src', 'hookmangen', 'sourcehook_hookmangen.cpp'),
+        os.path.join('src', 'inline', 'sourcehook_impl_inline.cpp'),
       ]
 
       if cxx.target.arch == 'x86':
-        lib.sources += [os.path.join('src', 'sourcehook_hookmangen_x86.cpp')]
+        lib.sources += [os.path.join('src', 'hookmangen', 'sourcehook_hookmangen_x86.cpp')]
       elif cxx.target.arch == 'x86_64' and cxx.target.platform != 'linux':
         # Matches metamod-source's own core/AMBuilder: the x86_64 vtable
         # hookmangen's GCC/Linux register-marshaling paths are
@@ -178,7 +183,7 @@ class SourceHookConfig(object):
         # identifier (a reserved alternative token under GCC/Clang), so it
         # isn't built on Linux x86_64 upstream either. Inline hooks
         # (sourcehook_inline.h) don't depend on this file.
-        lib.sources += [os.path.join('src', 'sourcehook_hookmangen_x86_64.cpp')]
+        lib.sources += [os.path.join('src', 'hookmangen', 'sourcehook_hookmangen_x86_64.cpp')]
 
       # Headers are always needed to compile sourcehook's own sources
       # (safetyhook.hpp, Zydis.h, tl/expected.hpp); the vendor .c/.cpp
