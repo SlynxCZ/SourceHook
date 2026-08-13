@@ -255,6 +255,19 @@ namespace SourceHook
 				return disp;
 			}
 
+			// Read-only lookup for SH_CALL: unlike GetOrCreate(), never
+			// installs anything -- returns nullptr if nothing is currently
+			// hooked at `addr` for this declared signature. That's the
+			// correct answer for SH_CALL too: if nothing's hooked there, the
+			// bytes at `addr` already *are* the untouched original.
+			static CInlineDispatcher *Find(void *addr)
+			{
+				std::lock_guard<std::mutex> lock(Map_Mutex());
+				auto &map = Map();
+				auto it = map.find(addr);
+				return it != map.end() ? it->second : nullptr;
+			}
+
 			int AddHook(Handler handler, bool post)
 			{
 				std::lock_guard<std::mutex> lock(m_Mutex);
@@ -499,6 +512,12 @@ namespace SourceHook
 			template <std::size_t N, typename T2, typename R2, typename... A2>
 			friend struct InlineTrampolineSlot;
 
+			// SH_CALL's InlineExecutable::operator() calls CallOriginal()
+			// directly (see below) to bypass every registered handler for
+			// one call, same reason InlineTrampolineSlot needs friendship.
+			template <typename T2, typename R2, typename... A2>
+			friend class InlineExecutable;
+
 			void *m_TargetAddr = nullptr;
 			safetyhook::InlineHook m_Hook;
 			int m_Slot = -1;
@@ -522,7 +541,84 @@ namespace SourceHook
 		{
 			return Dispatcher::RemoveHook(addr, handler, post);
 		}
+
+		// What SH_CALL(hookname, targetAddr[, thisptr]) returns for an
+		// inline-hooked target -- the same "callable you invoke with the
+		// real args, bypassing every registered handler for this one call"
+		// idea as ExecutableClassN is for vtable hooks' SH_CALL(ptr, mfp),
+		// just reached through the declared hookname's Dispatcher instead of
+		// a member-function pointer.
+		template <typename ThisClass, typename Ret, typename... Args>
+		class InlineExecutable
+		{
+		public:
+			InlineExecutable(void *addr, ThisClass *pThis) : m_Addr(addr), m_This(pThis) { }
+
+			Ret operator()(Args... args) const
+			{
+				using Dispatcher = CInlineDispatcher<ThisClass, Ret, Args...>;
+				if (Dispatcher *disp = Dispatcher::Find(m_Addr))
+					return disp->CallOriginal(m_This, args...);
+
+				// Nobody's hooked this address (for this signature) at all
+				// right now -- the bytes there already *are* the untouched
+				// original, so just call through them directly.
+				using RawFn = typename InlineRawFn<ThisClass, Ret, Args...>::Type;
+				if constexpr (std::is_void_v<ThisClass>)
+					return reinterpret_cast<RawFn>(m_Addr)(args...);
+				else
+					return reinterpret_cast<RawFn>(m_Addr)(m_This, args...);
+			}
+
+		private:
+			void *m_Addr;
+			ThisClass *m_This;
+		};
+
+		// The un-templated, thisclass-erased form MakeInlineCallable() below
+		// needs: SH_DECL_INLINEHOOK* generates a `HookTag` value (see
+		// generate/sourcehook_inline_decl.h) exposing exactly these three
+		// nested names, so SH_CALL doesn't need the caller to spell out
+		// ThisClass/Ret/Args... by hand.
+		template <typename HookTag, typename ThisClass>
+		typename HookTag::Callable MakeInlineCallable(HookTag, void *addr, ThisClass *pThis)
+		{
+			static_assert(std::is_same_v<ThisClass, typename HookTag::ThisClassT>,
+				"SH_CALL(hookname, targetAddr, thisptr): thisptr's type doesn't match "
+				"the thisclass this hook was declared with.");
+			return typename HookTag::Callable(addr, pThis);
+		}
+
+		// thisclass == void overload: SH_CALL(hookname, targetAddr), no this
+		// to pass -- same 2-argument shape as SH_CALL(ptr, mfp) for vtable
+		// hooks (see the SH_CALL2 overloads in sourcehook.h). Which overload
+		// set actually gets picked is resolved by the real C++ compiler on
+		// the *type* of the second macro argument (a HookTag value vs. a
+		// pointer-to-member-function) -- SH_CALL itself doesn't need to know
+		// which hook style it's looking at, same spirit as SH_IFACEPTR/
+		// RETURN_SH auto-detecting via the inline call-frame stack.
+		template <typename HookTag>
+		typename HookTag::Callable MakeInlineCallable(HookTag, void *addr)
+		{
+			static_assert(std::is_void_v<typename HookTag::ThisClassT>,
+				"SH_CALL(hookname, targetAddr) with only two arguments is for a hook "
+				"declared with thisclass = void; pass the this pointer as a third "
+				"argument for a non-void thisclass: SH_CALL(hookname, targetAddr, thisptr).");
+			return typename HookTag::Callable(addr, nullptr);
+		}
 	}
+}
+
+// SH_CALL2 overload for inline-hook targets: lets the *same* SH_CALL(a, b)
+// two-argument macro invocation (see sourcehook.h) resolve to either the
+// vtable path (ExecutableClassN, when `b` is a pointer-to-member-function)
+// or this one (when `b` is a value of a SH_DECL_INLINEHOOK*-generated
+// HookTag type) -- picked by ordinary C++ overload resolution on the actual
+// argument types, not by anything the macro itself has to decide.
+template <typename HookTag>
+typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook::ISourceHook *)
+{
+	return SourceHook::Impl::MakeInlineCallable(tag, addr);
 }
 
 // SHINT_INLINE_IFACEPTR(type): `this` of the function currently being inline-hooked,
@@ -632,10 +728,25 @@ namespace SourceHook
 		? *SourceHook::MacroRefHelpers<type>::GetOrigRet(SH_GLOB_SHPTR) \
 		: SHINT_INLINE_ORIG_RET(type))
 
+// `hookname` is a value (SH_DECL_INLINEHOOK* declares a constexpr instance,
+// not just a type -- see generate/sourcehook_inline_decl.h) so SH_CALL can
+// also take it as an argument; decltype() gets back to its Tag type here.
 #define SH_ADD_INLINEHOOK(hookname, targetAddr, handler, post) \
-	::SourceHook::Impl::AddInlineHook<SourceHookInlineDecl::hookname::Dispatcher>((targetAddr), (handler), (post))
+	::SourceHook::Impl::AddInlineHook<decltype(SourceHookInlineDecl::hookname)::Dispatcher>((targetAddr), (handler), (post))
 
 #define SH_REMOVE_INLINEHOOK(hookname, targetAddr, handler, post) \
-	::SourceHook::Impl::RemoveInlineHook<SourceHookInlineDecl::hookname::Dispatcher>((targetAddr), (handler), (post))
+	::SourceHook::Impl::RemoveInlineHook<decltype(SourceHookInlineDecl::hookname)::Dispatcher>((targetAddr), (handler), (post))
+
+// SH_CALL(hookname, targetAddr) / SH_CALL(hookname, targetAddr, thisptr):
+// call the real original for an inline-hooked target directly, bypassing
+// every Pre/Post handler registered on it for this one call -- the inline-
+// hook counterpart of vtable hooks' SH_CALL(ptr, mfp). Two- vs three-
+// argument form is picked by SH_CALL itself (arity dispatch, see
+// sourcehook.h); which *style* (vtable vs. inline) is picked for the two-
+// argument form is resolved by ordinary C++ overload resolution on the
+// second argument's type (see the SH_CALL2 overload above) -- same "one
+// macro name, auto-detects" spirit as SH_IFACEPTR/RETURN_SH.
+#define SH_CALL_INLINE3(hookname, targetAddr, thisptr) \
+	::SourceHook::Impl::MakeInlineCallable(SourceHookInlineDecl::hookname, (targetAddr), (thisptr))
 
 #endif //__SOURCEHOOK_INLINE_H__

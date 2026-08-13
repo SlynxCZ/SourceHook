@@ -202,6 +202,31 @@ what makes `thisclass` a template parameter instead of a hand-written JIT
 detail), and `test/testinlinehook.cpp` for what's verified (both a free
 function and a member function target).
 
+### SH_CALL for inline hooks
+
+Vtable hooks have always had `SH_CALL(ptr, mfp)`: call the real original for
+one call, bypassing every hook on that vtable slot. Inline hooks get the
+same thing through the same macro name:
+
+```cpp
+SH_CALL(MyHook, targetAddr)(args...);              // thisclass = void
+SH_CALL(MyOtherHook, otherAddr, pThis)(args...);    // thisclass != void
+```
+
+Two- vs. three-argument form is picked by `SH_CALL` itself (plain macro
+arity — the with-`this` form always needs three arguments, vtable hooks
+never do). The two *two*-argument shapes — `SH_CALL(ptr, mfp)` for a vtable
+hook vs. `SH_CALL(hookname, targetAddr)` for a `thisclass = void` inline
+hook — can't be told apart by the preprocessor (same argument count), so
+that part is resolved by ordinary C++ overload resolution instead, on
+whatever type the second argument actually is (a pointer-to-member-function
+vs. the value `SH_DECL_INLINEHOOK*` declares for `hookname`) — the same
+"one macro name, auto-detects" spirit as `SH_IFACEPTR`/`RETURN_SH`.
+
+If nothing is currently hooked at `targetAddr` at all, `SH_CALL` calls
+straight through the raw address instead of installing a hook just to
+serve the call — it never has the side effect of creating one.
+
 ## Decoupling a metamod:source plugin from the server's shared SourceHook
 
 A metamod:source plugin normally shares one SourceHook engine instance

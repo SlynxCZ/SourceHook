@@ -32,10 +32,14 @@ HEADER = """/* ======== SourceHook ========
 *
 * Declares SH_DECL_INLINEHOOK0..{max_arity}, the inline-hook counterpart of
 * upstream's SH_DECL_MANUALHOOK0..20 (see sourcehook.h). Each macro declares
-* a SourceHookInlineDecl::<hookname> type carrying the
+* a SourceHookInlineDecl::<hookname>_Tag type carrying the
 * SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1..N>
 * specialization that SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK
-* (sourcehook_inline.h) dispatch through for that hook name.
+* (sourcehook_inline.h) dispatch through for that hook name -- plus a
+* constexpr *value* actually named <hookname> (of that Tag type), so
+* SH_CALL(hookname, targetAddr[, thisptr]) can pass it as a real argument
+* and let ordinary C++ overload resolution pick it over vtable hooks'
+* SH_CALL(ptr, mfp) (see sourcehook_inline.h's SH_CALL2 overload).
 *
 * `thisclass` is `void` for a hooked function with no `this` (a real free
 * function), or the class type for a non-virtual member function -- see
@@ -60,11 +64,28 @@ def emit_macro(n):
   lines = []
   lines.append(f'#define SH_DECL_INLINEHOOK{n}({arg_list}) \\')
   lines.append('\tnamespace SourceHookInlineDecl { \\')
-  lines.append('\t\tstruct hookname \\')
+  lines.append('\t\tstruct hookname##_Tag \\')
   lines.append('\t\t{ \\')
   lines.append(f'\t\t\tusing Dispatcher = ::SourceHook::Impl::CInlineDispatcher<{template_args}>; \\')
+  lines.append('\t\t\tusing ThisClassT = thisclass; \\')
+  lines.append(f'\t\t\tusing Callable = ::SourceHook::Impl::InlineExecutable<{template_args}>; \\')
   lines.append('\t\t}; \\')
-  lines.append('\t}')
+  # A *value* named `hookname` (not just a type) -- SH_CALL(hookname, addr)
+  # needs to pass it as an argument for C++ overload resolution to pick the
+  # inline-hook SH_CALL2 overload over the vtable one; a bare type name
+  # can't be used as an expression. SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK
+  # reach the Dispatcher type back out via decltype(hookname)::Dispatcher.
+  lines.append('\t\tinline constexpr hookname##_Tag hookname{}; \\')
+  lines.append('\t} \\')
+  # SH_CALL(hookname, ...) needs plain, unqualified `hookname` to already
+  # name a value at the point of the call (its shared 2-argument macro path
+  # can't textually prefix "SourceHookInlineDecl::" itself -- that same path
+  # is also what vtable hooks' SH_CALL(ptr, mfp) expands through, and `ptr`
+  # there is an arbitrary expression, not something namespace-qualifiable).
+  # This brings just this one name out of SourceHookInlineDecl:: into
+  # whatever scope SH_DECL_INLINEHOOK* was invoked in, same spirit as a
+  # type alias but for the value itself.
+  lines.append('\tusing SourceHookInlineDecl::hookname;')
   return '\n'.join(lines) + '\n\n'
 
 

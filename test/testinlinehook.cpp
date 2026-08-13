@@ -193,6 +193,15 @@ bool TestInlineHook(std::string &error)
 
 	int result3 = TargetAdd(100);
 	CHECK(result3 == 1234, "RETURN_SH_VALUE(MRES_SUPERCEDE, ...) override was not honored");
+
+	// SH_CALL(hookname, targetAddr): the override Pre handler above is still
+	// registered and would SUPERCEDE a normal call -- SH_CALL must bypass it
+	// (and every other registered handler) entirely and reach the real
+	// original, same "ignore hooks for this one call" contract as vtable
+	// hooks' SH_CALL(ptr, mfp).
+	int bypassResult = SH_CALL(TestInlineAdd, addr)(100);
+	CHECK(bypassResult == 141, "SH_CALL did not bypass the registered handlers and call the real original");
+
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineAdd, addr, SH_STATIC(StaticPreOverride), false),
 		"failed to remove the override Pre handler");
 
@@ -207,6 +216,13 @@ bool TestInlineHook(std::string &error)
 
 	int result4 = TargetAdd(3);
 	CHECK(result4 == 44, "function did not return to its original, unhooked behavior after teardown");
+
+	// SH_CALL with nothing hooked at `addr` at all: no dispatcher exists for
+	// it, so SH_CALL must fall back to calling straight through the raw
+	// address instead of (incorrectly) creating a hook just to serve the call.
+	int bypassResultNoHook = SH_CALL(TestInlineAdd, addr)(3);
+	CHECK(bypassResultNoHook == 44, "SH_CALL with no active hook did not call the raw target directly");
+	CHECK(guard.TargetCount() == baseline, "SH_CALL must not install a dispatcher as a side effect");
 
 	// -------- member function: `this` via SH_IFACEPTR --------
 	// volatile + calling through a raw pointer derived once, same reasoning
@@ -228,8 +244,20 @@ bool TestInlineHook(std::string &error)
 	CHECK(memberResult == 15, "member-function call did not return the original result");
 	CHECK(g_LastThis == pAdder, "SH_IFACEPTR did not return the real `this` pointer");
 
+	// SH_CALL(hookname, targetAddr, thisptr): three-argument form for a
+	// non-void thisclass -- same bypass contract, just with `this` supplied
+	// explicitly since the target isn't a free function.
+	g_LastThis = nullptr;
+	int memberBypassResult = SH_CALL(TestInlineMemberAdd, memberAddr, pAdder)(5);
+	CHECK(memberBypassResult == 15, "SH_CALL (member) did not bypass the handler and call the real original");
+	CHECK(g_LastThis == nullptr, "SH_CALL (member) must not have run MemberDetour at all");
+
 	CHECK(SH_REMOVE_INLINEHOOK(TestInlineMemberAdd, memberAddr, SH_STATIC(MemberDetour), false),
 		"failed to remove the member-function hook");
+
+	// And again with nothing hooked at all.
+	int memberBypassNoHook = SH_CALL(TestInlineMemberAdd, memberAddr, pAdder)(5);
+	CHECK(memberBypassNoHook == 15, "SH_CALL (member) with no active hook did not call the raw target directly");
 
 	return true;
 }

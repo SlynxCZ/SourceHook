@@ -4928,7 +4928,26 @@ SH_MCALL3(Y *ptr, MFP mfp, RetType(X::*mfp2)(Params..., ...), int vtblidx, int v
 		reinterpret_cast<SourceHook::EmptyClass*>(ptr), mfp, vfnptr, shptr);
 }
 
-#define SH_CALL(ptr, mfp) SH_CALL2((ptr), (mfp), (mfp), SH_GLOB_SHPTR)
+// SH_CALL(ptr, mfp) -- vtable hooks: call the real original directly for
+// this one call, bypassing every hook on that vtable slot (SetIgnoreHooks/
+// ResetIgnoreHooks around a normal call through it, see ExecutableClassN
+// above).
+//
+// SH_CALL(hookname, targetAddr) / SH_CALL(hookname, targetAddr, thisptr) --
+// inline hooks: the same idea, for a SH_DECL_INLINEHOOK*-declared target
+// (needs sourcehook_inline.h, i.e. SOURCEHOOK_NO_INLINE not defined). Which
+// of these three shapes is meant is resolved automatically: two- vs.
+// three-argument is plain macro arity (SH__SH_CALL_PICK below); the two
+// two-argument cases (vtable vs. inline-with-void-thisclass) are told apart
+// by ordinary C++ overload resolution on the second argument's *type* (a
+// pointer-to-member-function vs. a SH_DECL_INLINEHOOK*-generated hook tag
+// value) -- see sourcehook_inline.h's SH_CALL2 overload. Same "one macro
+// name, auto-detects" spirit as SH_IFACEPTR/RETURN_SH.
+#define SH__SH_CALL_2(ptr, mfp) SH_CALL2((ptr), (mfp), (mfp), SH_GLOB_SHPTR)
+#define SH__SH_CALL_3(hookname, targetAddr, thisptr) SH_CALL_INLINE3(hookname, targetAddr, thisptr)
+#define SH__SH_CALL_PICK(_1, _2, _3, NAME, ...) NAME
+#define SH_CALL(...) SH__SH_CALL_PICK(__VA_ARGS__, SH__SH_CALL_3, SH__SH_CALL_2)(__VA_ARGS__)
+
 #define SH_MCALL2(ptr, mfp, vtblidx, vtbloffs, thisptroffs) SH_MCALL3((ptr), (mfp), (mfp), (vtblidx), (vtbloffs), (thisptroffs), SH_GLOB_SHPTR)
 #define SH_MCALL(ptr, mhookname) __SoureceHook_FHM_SHCall##mhookname(ptr)
 
