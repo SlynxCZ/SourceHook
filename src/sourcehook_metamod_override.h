@@ -25,8 +25,16 @@
 //   #include "sourcehook_metamod_override.h"
 //
 //   SH_DECL_HOOK1_void(SomeClass, SomeMethod, SH_NOATTRIB, 0, int);
-//   // ... SH_ADD_HOOK/SH_ADD_MANUALHOOK/SH_ADD_INLINEHOOK from here on all
-//   // go through g_pSourceHook, not metamod's g_SHPtr.
+//
+//   bool MyPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
+//   {
+//       PLUGIN_SAVEVARS();
+//       SH_METAMOD_OVERRIDE_SAVEVARS(id);   // <-- right after, same as PLUGIN_SAVEVARS()
+//       ...
+//   }
+//
+//   // SH_ADD_HOOK/SH_ADD_MANUALHOOK/SH_ADD_INLINEHOOK from here on all go
+//   // through g_pSourceHook, not metamod's g_SHPtr.
 //
 // Must be included AFTER sourcehook.h (directly or transitively, e.g. via
 // ISmmPlugin.h) has already defined the default SH_GLOB_SHPTR/
@@ -34,6 +42,12 @@
 // undefine -- and BEFORE any SH_DECL_HOOK*/SH_ADD_*HOOK/SH_DECL_INLINEHOOK*
 // call you want routed through the private instance, since these macros
 // resolve SH_GLOB_SHPTR/SH_GLOB_PLUGPTR at the point they're expanded.
+//
+// SH_METAMOD_OVERRIDE_SAVEVARS(id) just gives g_iSourceHookPluginId the
+// plugin's real metamod-assigned id (mirroring what PLUGIN_SAVEVARS() does
+// for g_PLID) instead of leaving it at its static-init default of 0 --
+// cosmetic for a solo-owned instance (nothing else ever registers against
+// it), but keeps it traceable/consistent with the rest of the plugin ABI.
 //
 // Caveat: g_pSourceHook is NOT the same engine instance as metamod's
 // g_SHPtr (or any other plugin using it). Hooks installed through
@@ -58,5 +72,10 @@ inline SourceHook::Plugin g_iSourceHookPluginId = 0;
 #define SH_GLOB_SHPTR g_pSourceHook
 #undef SH_GLOB_PLUGPTR
 #define SH_GLOB_PLUGPTR g_iSourceHookPluginId
+
+// Call right after PLUGIN_SAVEVARS() in Load(), same spirit/placement --
+// see the usage example above.
+#define SH_METAMOD_OVERRIDE_SAVEVARS(id) \
+	g_iSourceHookPluginId = static_cast<SourceHook::Plugin>(id)
 
 #endif //__SOURCEHOOK_METAMOD_OVERRIDE_H__
