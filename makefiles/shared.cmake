@@ -1,4 +1,4 @@
-# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Copyright (C) 2026 Metamod:Source Development Team
 # Author(s): Michal "Slynx" Přikryl
 # Compiler/linker flags shared by the sourcehook library and its test binary.
 # Modeled after DynLibUtils' CMakeLists.txt flag set (a standalone-library

@@ -1,4 +1,4 @@
-# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Copyright (C) 2026 Metamod:Source Development Team
 # Author(s): Michal "Slynx" Přikryl
 cmake_minimum_required(VERSION 3.18)
 project(sourcehook CXX C)

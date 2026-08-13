@@ -1,5 +1,5 @@
 # vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
-# Copyright (C) 2004-2026 Metamod:Source Development Team
+# Copyright (C) 2026 Metamod:Source Development Team
 # Author(s): Michal "Slynx" Přikryl
 import os, sys
 
