@@ -53,20 +53,23 @@ endif()
 
 add_library(sourcehook STATIC ${SOURCEHOOK_SOURCES})
 
-# src/{core,hookmangen,inline,util} all cross-include each other by bare
-# filename (e.g. sourcehook.h -> "sh_list.h"), so all four need to be on the
-# search path -- see each subdirectory's own role: core/ is the base engine,
-# hookmangen/ the vtable-hook JIT, inline/ the inline-hook dispatch,
-# util/ the low-level building blocks (sh_*.h, FastDelegate.h) all three share.
+# public/ is the ONE directory a consumer needs on its own include path --
+# sourcehook.h (which now pulls in sourcehook_inline.h itself, see its file
+# header) and everything it transitively needs (sourcehook_impl*.h, sh_*.h,
+# FastDelegate.h) all live there flat, resolved by bare filename. vendor/
+# {safetyhook,tl,zydis} are PUBLIC too since sourcehook_inline.h needs
+# safetyhook.hpp. src/hookmangen is PRIVATE: the vtable-hook JIT codegen
+# internals (sourcehook_hookmangen*, sh_asm*.h, sourcehook_pibuilder.h)
+# nothing outside this library's own build ever needs to see.
 target_include_directories(sourcehook PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hookmangen
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/inline
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/util
+    ${CMAKE_CURRENT_SOURCE_DIR}/public
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/safetyhook
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tl
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/zydis
+)
+target_include_directories(sourcehook PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hookmangen
 )
 
 target_compile_definitions(sourcehook PRIVATE ZYDIS_STATIC_BUILD)

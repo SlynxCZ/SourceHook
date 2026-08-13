@@ -37,21 +37,31 @@ relies on throughout. GCC ≥10 is untested but should work; adjust `CXX`/`CC`
 
 ## Layout
 
-- `src/core/` — the base engine: `sourcehook.h`/`.cpp` (also where
-  `SH_DECL_HOOK*`/`SH_DECL_MANUALHOOK*`/`SH_DECL_INLINEHOOK*` — all three
-  hook styles' declare macros — live together), `sourcehook_impl*`,
-  `sourcehook_pibuilder.h`. Copied from `metamod-source/core/sourcehook`
-  unmodified except for removing a dead, metamod-only debug helper (see
-  "Decoupling from metamod" below).
+Two-tier split: `public/` is the **one** directory a consumer ever needs on
+its own include path; `src/` is this library's own implementation, which a
+consumer never touches directly (its own build already handles it via
+either sub-build convention below).
+
+- `public/` — everything `#include "sourcehook.h"` needs, transitively,
+  flat in one folder: `sourcehook.h` itself (where `SH_DECL_HOOK*`/
+  `SH_DECL_MANUALHOOK*`/`SH_DECL_INLINEHOOK*` — all three hook styles'
+  declare macros — live together, and which now `#include`s
+  `sourcehook_inline.h` itself too, see "Three hook styles, one header"
+  below), `sourcehook_inline.h`, `sourcehook_impl*.h`,
+  `sourcehook_impl_inline.h`, `sourcehook_metamod_override.h` (opt a
+  metamod:source plugin out of the server's shared SourceHook and onto a
+  private instance of this one), and the low-level building blocks they all
+  need (`sh_*.h`, `FastDelegate.h`).
+- `src/` — the engine's own `.cpp` implementation (`sourcehook.cpp`,
+  `sourcehook_impl_*.cpp`, `sourcehook_impl_inline.cpp`). Copied from
+  `metamod-source/core/sourcehook` unmodified except for removing a dead,
+  metamod-only debug helper (see "Decoupling from metamod" below).
 - `src/hookmangen/` — the vtable-hook JIT code generator
-  (`sourcehook_hookmangen*`) that `SH_DECL_HOOK`/`SH_DECL_MANUALHOOK` need
-  at runtime. See "Known upstream gap" below for its Linux x86_64 status.
-- `src/inline/` — the new inline-hook dispatch layer:
-  `sourcehook_inline.h` (start here), `sourcehook_impl_inline.h/.cpp`,
-  `sourcehook_metamod_override.h` (opt a metamod:source plugin out of the
-  server's shared SourceHook and onto a private instance of this one).
-- `src/util/` — low-level building blocks shared by the above:
-  `sh_*.h`, `FastDelegate.h`.
+  (`sourcehook_hookmangen*`, plus its own private `sh_asm*.h`/
+  `sourcehook_pibuilder.h`) that `SH_DECL_HOOK`/`SH_DECL_MANUALHOOK` need at
+  runtime. Fully private to this library's own build — a normal consumer
+  never needs this on its include path, only `public/`. See "Known
+  upstream gap" below for its Linux x86_64 status.
 - `vendor/` — `safetyhook` (the inline-hook engine), `zydis` (safetyhook's
   disassembler dependency), `tl::expected` (safetyhook's error type). Copied
   as plain files from `InventoryManager_mm_es/vendor`, not submodules.
@@ -60,10 +70,9 @@ relies on throughout. GCC ≥10 is untested but should work; adjust `CXX`/`CC`
   `testinlinehook.cpp` for the new inline-hook dispatch.
 - `generate/` — `gen_inline_hooks.py` generates `sourcehook_inline_decl.h`
   (the `SH_DECL_INLINEHOOK0..20` macro family, `#include`d from
-  `src/core/sourcehook.h`). `generate/upstream_codegen/` is
-  metamod-source's own original `sourcehook.hxx` + `shworker` codegen tool
-  that produces `sourcehook.h`, kept for provenance; this repo doesn't run
-  it.
+  `public/sourcehook.h`). `generate/upstream_codegen/` is metamod-source's
+  own original `sourcehook.hxx` + `shworker` codegen tool that produces
+  `sourcehook.h`, kept for provenance; this repo doesn't run it.
 
 ## Using this from another project
 
@@ -72,9 +81,10 @@ listing/globbing its sources yourself:
 
 - **CMake**: `add_subdirectory(vendor/sourcehook)` then
   `target_link_libraries(yourtarget sourcehook)` — its `PUBLIC` include
-  dirs (and, transitively, `vendor/safetyhook`'s headers) come along
-  automatically. Set `SOURCEHOOK_BUILD_TESTS OFF` first if you don't want
-  its own test suite pulled into your build.
+  dirs (`public/` and, transitively, `vendor/safetyhook`'s headers) come
+  along automatically, nothing else to configure. Set
+  `SOURCEHOOK_BUILD_TESTS OFF` first if you don't want its own test suite
+  pulled into your build.
 - **AmBuild**: same convention metamod-source itself uses for
   `versionlib/AMBuildScript`:
   ```python
@@ -82,13 +92,19 @@ listing/globbing its sources yourself:
     'SourceHookBundleVendor': False,  # omit if you have no vendor/{safetyhook,zydis} of your own
   })
   ...
-  binary.compiler.linkflags += [SourceHookLib[cxx.target.arch]]
+  binary.compiler.linkflags += [SourceHookLib['binaries_by_arch'][cxx.target.arch]]
+  SourceHookLib['config'].AddPublicIncludes(binary)
   ```
-  `SourceHookBundleVendor=False` skips compiling `vendor/safetyhook`/
-  `vendor/zydis` into `libsourcehook` itself (headers are still added to
-  the include path either way) — set it if your own project already
-  compiles its own copies of those two, to avoid duplicate-symbol link
-  errors from two static libraries both containing the same object code.
+  `AddPublicIncludes()` adds every include path a consumer of `sourcehook.h`
+  needs in one call (computed from *this* repo's own `builder.sourcePath`)
+  — you never hand-list `public/`/`vendor/safetyhook`/`vendor/tl`/
+  `vendor/zydis` yourself, and it keeps working if this repo's own internal
+  layout ever changes again. `SourceHookBundleVendor=False` skips compiling
+  `vendor/safetyhook`/`vendor/zydis` into `libsourcehook` itself (headers
+  are still added to the include path either way) — set it if your own
+  project already compiles its own copies of those two, to avoid
+  duplicate-symbol link errors from two static libraries both containing
+  the same object code.
 
 See `InventoryManager_mm_es`'s `sourcehook_inline` branch for both of these
 in real use, including `sourcehook_metamod_override.h` (below).
@@ -96,11 +112,15 @@ in real use, including `sourcehook_metamod_override.h` (below).
 ## Three hook styles, one header
 
 `SH_DECL_HOOK*`, `SH_DECL_MANUALHOOK*`, and `SH_DECL_INLINEHOOK*` are all
-declared together in `src/core/sourcehook.h` — inline hooks are a third
+declared together in `public/sourcehook.h` — inline hooks are a third
 option alongside the two vtable-hook styles, not a separate thing bolted on
-the side. Only inline hooks' *implementation* (`sourcehook_inline.h`, which
-needs `safetyhook.hpp`) is a separate include, kept out of the dependency-free
-base header for anyone who only wants typed/manual hooks.
+the side. `sourcehook.h` also `#include`s inline hooks' own *implementation*
+(`sourcehook_inline.h`) itself, at the bottom of the file — a single
+`#include "sourcehook.h"` is enough for all three hook styles, nothing else
+to remember. This does mean `sourcehook.h` now needs `safetyhook.hpp` (+
+`vendor/tl`/`vendor/zydis`) on the include path unconditionally; `#define
+SOURCEHOOK_NO_INLINE` before including it to opt back out and get the old
+dependency-free, typed/manual-only header.
 
 All three styles also share **one** macro family — `SH_IFACEPTR`/
 `RETURN_SH`/`RETURN_SH_VALUE`/`SET_SH_RESULT`/`SH_RESULT_ORIG_RET`/
@@ -130,7 +150,7 @@ declared parameter list either (same as `SH_DECL_HOOK`/`SH_DECL_MANUALHOOK`)
 already work for those.
 
 ```cpp
-#include "sourcehook_inline.h"
+#include "sourcehook.h"   // sourcehook_inline.h comes along automatically
 
 // free function, no `this` (thisclass = void):
 SH_DECL_INLINEHOOK1(MyHook, void, int, CBaseEntity *);
@@ -156,7 +176,7 @@ SH_ADD_INLINEHOOK(MyOtherHook, otherAddr, SH_MEMBER(this, &MyClass::MyOtherDetou
 SH_REMOVE_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false);
 ```
 
-Any translation unit that includes `sourcehook_inline.h` and uses these
+Any translation unit that includes `sourcehook.h` and uses these
 unified macros needs `SH_GLOB_SHPTR`/`SH_GLOB_PLUGPTR` (default:
 `g_SHPtr`/`g_PLID`) declared somewhere reachable, even for a file that only
 ever uses inline hooks — the macros' vtable-hook fallback branch still
@@ -185,7 +205,7 @@ function and a member function target).
 A metamod:source plugin normally shares one SourceHook engine instance
 across the whole server (`PLUGIN_SAVEVARS()` points `g_SHPtr`/`g_PLID` at
 whatever `ISourceHook` `metamod.so` itself was built with). Including
-`src/inline/sourcehook_metamod_override.h` after `<ISmmPlugin.h>` opts a
+`sourcehook_metamod_override.h` (in `public/`) after `<ISmmPlugin.h>` opts a
 plugin out of that and onto its own private, plugin-owned instance of
 *this* SourceHook instead — e.g. to get `SH_DECL_INLINEHOOK` support
 without depending on the target server's metamod build at all:
@@ -206,6 +226,14 @@ bool MyPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 See the header itself for the full rationale and the one caveat (hooks
 through the private instance aren't coordinated with metamod's shared one,
 or any other plugin's, on the same vtable slot/address).
+
+`SH_IFACE_VERSION` is `6` in this fork (upstream metamod-source is `5`) —
+bumped once, for the inline-hook + unified-macro changes above, to mark
+that a plugin built against this fork's `sourcehook.h` has diverged from
+what metamod-source itself ships. This only matters for a private
+`ISourceHook` instance from this fork (above); plugins sharing metamod's
+own SourceHook still negotiate version `5` as before. See `sourcehook.h`'s
+"Interface revisions" comment for the full history.
 
 ## Decoupling from metamod
 

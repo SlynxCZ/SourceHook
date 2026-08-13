@@ -30,6 +30,11 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     )
     target_compile_definitions(test_sourcehook PRIVATE SOURCEHOOK_TESTS)
     target_link_libraries(test_sourcehook PRIVATE sourcehook)
+    # This legacy suite -- unlike a normal consumer -- also reaches directly
+    # into the hookmangen JIT internals (main.cpp, testhookmangen.cpp), which
+    # are PRIVATE to the sourcehook target and don't come along via
+    # target_link_libraries above.
+    target_include_directories(test_sourcehook PRIVATE ${CMAKE_SOURCE_DIR}/src/hookmangen)
     sourcehook_apply_platform_flags(test_sourcehook)
     add_test(NAME sourcehook_legacy_tests COMMAND test_sourcehook)
 elseif(LINUX)

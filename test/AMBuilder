@@ -12,11 +12,11 @@ for cxx in SHook.all_targets:
   if cxx.target.platform == 'linux' and cxx.target.arch == 'x86':
     binary = cxx.Program('test_sourcehook')
     binary.compiler.defines += ['SOURCEHOOK_TESTS']
-    binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath, 'src', 'core'),
-      os.path.join(builder.sourcePath, 'src', 'hookmangen'),
-      os.path.join(builder.sourcePath, 'src', 'util'),
-    ]
+    # This legacy suite -- unlike a normal consumer -- also reaches directly
+    # into the hookmangen JIT internals (main.cpp, testhookmangen.cpp), so
+    # it needs both the public headers and the private hookmangen ones.
+    SHook.AddPublicIncludes(binary)
+    SHook.AddHookmanGenIncludes(binary)
     if binary.compiler.version >= 'gcc-4.9':
       binary.compiler.cxxflags += ['-fno-devirtualize']
     if binary.compiler.version >= 'clang-2.9' or binary.compiler.version >= 'apple-clang-3.0':
@@ -54,11 +54,6 @@ for cxx in SHook.all_targets:
   # x86_64 SysV for now -- see sourcehook_inline.h's file header for why.
   if cxx.target.platform == 'linux' and cxx.target.arch == 'x86_64':
     binary = cxx.Program('test_sourcehook_inline')
-    binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath, 'src', 'core'),
-      os.path.join(builder.sourcePath, 'src', 'inline'),
-      os.path.join(builder.sourcePath, 'src', 'util'),
-    ]
 
     binary.sources += [
       'main_inline.cpp',
@@ -66,5 +61,5 @@ for cxx in SHook.all_targets:
       os.path.join('..', 'src', 'inline', 'sourcehook_impl_inline.cpp'),
     ]
     SHook.AddVendorSources(binary)
-    SHook.AddVendorIncludes(binary)
+    SHook.AddPublicIncludes(binary)
     builder.Add(binary)

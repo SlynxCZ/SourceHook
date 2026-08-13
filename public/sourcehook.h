@@ -1,10 +1,11 @@
 /* ======== SourceHook ========
-* Copyright (C) 2004-2010 Metamod:Source Development Team
+* Copyright (C) 2004-2026 Metamod:Source Development Team
 * No warranties of any kind
 *
 * License: zlib/libpng
 *
 * Author(s): Pavol "PM OnoTo" Marko
+* Contributors: Michal "Slynx" Přikryl
 * ============================
 */
 
@@ -22,7 +23,17 @@
 //  3 - Added "hook loop status variable"
 //  4 - Reentrant
 //  5 - New "V2" interface
-#define SH_IFACE_VERSION 5
+//  6 - SlynxCZ/SourceHook fork: added inline hooks (SH_DECL_INLINEHOOK*,
+//      sourcehook_inline.h, now #include'd by this header automatically --
+//      see the bottom of this file) as a third hook category alongside
+//      typed/manual vtable hooks, and unified all three styles' result/
+//      iface-pointer macros (SH_IFACEPTR/RETURN_SH/RETURN_SH_VALUE/
+//      SET_SH_RESULT/SHRES_*) into one auto-detecting set instead of a
+//      separate name per style. Not a metamod-source upstream revision --
+//      this only matters for consumers that talk to a private ISourceHook
+//      instance from this fork (see sourcehook_metamod_override.h); plugins
+//      sharing metamod's own SourceHook still negotiate SH_IFACE_VERSION 5.
+#define SH_IFACE_VERSION 6
 
 // Impl versions:
 // ???
@@ -4776,7 +4787,7 @@ namespace SourceHook
 	}
 }
 
-#include "../../generate/sourcehook_inline_decl.h"
+#include "../generate/sourcehook_inline_decl.h"
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -4985,6 +4996,20 @@ namespace SourceHook
 		return reinterpret_cast<Iface*>(shptr->GetIfacePtr());
 	}
 }
+
+// Third hook style: SH_DECL_INLINEHOOK* (declared above) needs
+// sourcehook_inline.h's actual dispatcher implementation and
+// SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK to do anything -- pulled in here so
+// a consumer gets all three hook styles from this one #include, instead of
+// having to separately remember "#include sourcehook_inline.h too" on top
+// of this header. This does mean anyone who includes sourcehook.h now also
+// needs vendor/safetyhook (+ its own tl::expected/Zydis deps) on their
+// include path, even if they only ever use typed/manual (vtable) hooks --
+// pass -DSOURCEHOOK_NO_INLINE (or #define it before this #include) to opt
+// back out and get the old dependency-free base header.
+#ifndef SOURCEHOOK_NO_INLINE
+#include "sourcehook_inline.h"
+#endif
 
 #endif
 	// The pope is dead. -> :(

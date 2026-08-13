@@ -15,7 +15,15 @@
 #                                           # its own to collide with
 #      })
 #      ...
-#      binary.compiler.linkflags += [SourceHookLib[cxx.target.arch]]
+#      binary.compiler.linkflags += [SourceHookLib['binaries_by_arch'][cxx.target.arch]]
+#      SourceHookLib['config'].AddPublicIncludes(binary)
+#
+#    AddPublicIncludes() is the point: it adds every include path a consumer
+#    of sourcehook.h needs (public/ + vendor/{safetyhook,tl,zydis}) in one
+#    call, computed from *this* repo's own builder.sourcePath -- so a caller
+#    never has to hand-list sourcehook's internal folder layout itself (and
+#    re-break every time that layout changes, like it just did going from
+#    src/{core,hookmangen,inline,util} to public/ + src/hookmangen).
 #
 #    SourceHookBundleVendor=False skips compiling vendor/safetyhook and
 #    vendor/zydis into libsourcehook (their headers are still added to the
@@ -130,14 +138,18 @@ class SourceHookConfig(object):
     elif cxx.target.platform == 'windows':
       cxx.defines += ['WIN32', '_WINDOWS']
 
-  def AddVendorIncludes(self, binary):
-    # src/{core,hookmangen,inline,util} cross-include each other by bare
-    # filename, so all four need to be on the search path.
+  def AddPublicIncludes(self, binary):
+    # public/ is the ONE directory a consumer needs: sourcehook.h (which
+    # pulls in sourcehook_inline.h itself, see its file header) and
+    # everything it transitively needs (sourcehook_impl*.h, sh_*.h,
+    # FastDelegate.h) all live there flat, resolved by bare filename.
+    # vendor/{safetyhook,tl,zydis} are needed too since sourcehook_inline.h
+    # needs safetyhook.hpp. Call this on any binary that #includes
+    # sourcehook.h -- this library's own sources and any downstream
+    # consumer alike (see this file's own header comment for the
+    # SourceHookLib['config'].AddPublicIncludes(binary) sub-build usage).
     binary.compiler.cxxincludes += [
-      os.path.join(builder.sourcePath, 'src', 'core'),
-      os.path.join(builder.sourcePath, 'src', 'hookmangen'),
-      os.path.join(builder.sourcePath, 'src', 'inline'),
-      os.path.join(builder.sourcePath, 'src', 'util'),
+      os.path.join(builder.sourcePath, 'public'),
       os.path.join(builder.sourcePath, 'vendor'),
       os.path.join(builder.sourcePath, 'vendor', 'safetyhook'),
       os.path.join(builder.sourcePath, 'vendor', 'tl'),
@@ -149,6 +161,16 @@ class SourceHookConfig(object):
       os.path.join(builder.sourcePath, 'vendor', 'zydis'),
     ]
     binary.compiler.defines += ['ZYDIS_STATIC_BUILD']
+
+  def AddHookmanGenIncludes(self, binary):
+    # src/hookmangen holds the vtable-hook JIT codegen internals
+    # (sourcehook_hookmangen*, sh_asm*.h, sourcehook_pibuilder.h) -- private
+    # to this library's own build. Only needed by binaries that compile (or,
+    # like the legacy test suite, directly #include) those internals -- a
+    # normal downstream consumer never needs this, only AddPublicIncludes.
+    binary.compiler.cxxincludes += [
+      os.path.join(builder.sourcePath, 'src', 'hookmangen'),
+    ]
 
   def AddVendorSources(self, binary):
     binary.sources += [
@@ -188,7 +210,8 @@ class SourceHookConfig(object):
       # Headers are always needed to compile sourcehook's own sources
       # (safetyhook.hpp, Zydis.h, tl/expected.hpp); the vendor .c/.cpp
       # themselves are opt-out, see the file header comment above.
-      self.AddVendorIncludes(lib)
+      self.AddPublicIncludes(lib)
+      self.AddHookmanGenIncludes(lib)
       if SourceHookBundleVendor:
         self.AddVendorSources(lib)
 
@@ -208,6 +231,11 @@ if BuildScripts:
   builder.Build(BuildScripts, { 'SHook': SHook })
 
 # What a parent build (builder.Build('vendor/sourcehook/AMBuildScript', {...}))
-# gets back -- a dict of {arch: compiled libsourcehook path}, same convention
-# as metamod-source's own versionlib/AMBuildScript.
-rvalue = SHook.binaries_by_arch
+# gets back: the compiled-library paths (same {arch: path} convention as
+# metamod-source's own versionlib/AMBuildScript), plus the config object
+# itself so the caller can call SourceHookLib['config'].AddPublicIncludes(binary)
+# instead of re-declaring sourcehook's internal folder layout by hand.
+rvalue = {
+  'binaries_by_arch': SHook.binaries_by_arch,
+  'config': SHook,
+}
