@@ -4950,21 +4950,28 @@ SH_MCALL3(Y *ptr, MFP mfp, RetType(X::*mfp2)(Params..., ...), int vtblidx, int v
 #define SH__SH_CALL_2(ptr, mfp) SH_CALL2((ptr), (mfp), (mfp), SH_GLOB_SHPTR)
 #define SH__SH_CALL_3(hookname, targetAddr, thisptr) SH_CALL_INLINE3(hookname, targetAddr, thisptr)
 #define SH__SH_CALL_PICK(_1, _2, _3, NAME, ...) NAME
-// SH__SH_CALL_EXPAND + the extra indirection below it (wrapping the PICK
-// call's result before appending "(__VA_ARGS__)") work around MSVC's
-// traditional preprocessor: unlike GCC/Clang, it does NOT rescan/re-split
-// __VA_ARGS__ into separate arguments when handing it to another
-// function-like macro in the same expansion step -- it treats the whole
-// thing as one opaque token, so SH__SH_CALL_PICK never sees _1/_2/_3 as
-// distinct and NAME resolves to nothing, which is exactly the "not enough
-// arguments for function-like macro invocation" MSVC reports for this call
-// otherwise. Forcing the PICK call through one extra macro layer (EXPAND's
-// body is just its argument, so substituting into it triggers a second,
-// correct rescan) is the standard, portable fix for this specific MSVC
-// quirk -- doesn't need /Zc:preprocessor (which would change how every
-// OTHER macro in a consumer's own translation unit is parsed too).
+// SH__SH_CALL_EXPAND works around MSVC's traditional preprocessor: unlike
+// GCC/Clang, it does NOT rescan/re-split __VA_ARGS__ into separate
+// arguments when handing it to another function-like macro in the same
+// expansion step -- it treats the whole thing as one opaque token. That
+// bites TWICE in this one macro, not just once: first inside
+// SH__SH_CALL_PICK(__VA_ARGS__, ...) itself (NAME never resolves, "not
+// enough arguments for function-like macro invocation
+// 'SH__SH_CALL_PICK'"), and *again* at the final NAME(__VA_ARGS__) call --
+// e.g. SH__SH_CALL_2(__VA_ARGS__) still only sees one opaque argument where
+// it expects two, so MSVC also fails there with "not enough arguments...
+// 'SH__SH_CALL_2'" even once the PICK step itself is fixed. Wrapping only
+// the PICK call (an earlier, incomplete version of this fix) closes the
+// first failure but not the second. The complete, standard fix is to wrap
+// the *entire* "resolve NAME, then call it with the same args" expression
+// -- PICK(...)(...) as one unit -- in EXPAND: substituting the whole thing
+// into EXPAND's body (just `x`) forces one full extra rescan pass, and it's
+// only *during* that rescan that MSVC's preprocessor correctly re-splits
+// __VA_ARGS__ apart, at every level, not just the outermost one. Doesn't
+// need /Zc:preprocessor (which would change how every OTHER macro in a
+// consumer's own translation unit is parsed too).
 #define SH__SH_CALL_EXPAND(x) x
-#define SH_CALL(...) SH__SH_CALL_EXPAND(SH__SH_CALL_PICK(__VA_ARGS__, SH__SH_CALL_3, SH__SH_CALL_2))(__VA_ARGS__)
+#define SH_CALL(...) SH__SH_CALL_EXPAND(SH__SH_CALL_PICK(__VA_ARGS__, SH__SH_CALL_3, SH__SH_CALL_2)(__VA_ARGS__))
 
 #define SH_MCALL2(ptr, mfp, vtblidx, vtbloffs, thisptroffs) SH_MCALL3((ptr), (mfp), (mfp), (vtblidx), (vtbloffs), (thisptroffs), SH_GLOB_SHPTR)
 #define SH_MCALL(ptr, mhookname) __SoureceHook_FHM_SHCall##mhookname(ptr)
