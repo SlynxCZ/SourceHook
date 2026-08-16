@@ -152,6 +152,23 @@ class SourceHookConfig(object):
     # Platform-specifics
     if cxx.target.platform == 'linux':
       cxx.defines += ['_LINUX', 'LINUX', 'POSIX', '_FILE_OFFSET_BITS=64']
+
+      # ABI parity with whatever links this static lib in: the CS2 HL2SDK
+      # manifest (hl2sdk-manifests/manifests/cs2.json) forces
+      # _GLIBCXX_USE_CXX11_ABI=0 (the pre-C++11 std::string/std::vector
+      # layout) onto the consumer plugin's own translation units via
+      # SdkHelpers.configureCxx(), but this standalone sub-build never
+      # touches that manifest -- without this define it silently defaults
+      # to the modern (=1) ABI instead, so any type here that embeds
+      # std::string/std::vector/etc (e.g. CSourceHookImpl's containers)
+      # would get a genuinely different sizeof/layout in libsourcehook.a
+      # than in the plugin's own TUs. This exact mismatch (missing in
+      # dynlibutils' own AMBuildScript, not this one specifically) was
+      # confirmed as the root cause of a real Plugin::Load crash -- see
+      # vendor/dynlibutils/AMBuildScript's identical fix for the full
+      # writeup. Apply the same fix here pre-emptively rather than wait
+      # for it to actually bite.
+      cxx.defines += ['_GLIBCXX_USE_CXX11_ABI=0']
     elif cxx.target.platform == 'windows':
       cxx.defines += ['WIN32', '_WINDOWS']
 
