@@ -28,7 +28,7 @@
 
 #include <string>
 
-#include "sourcehook/sourcehook_cinline.h"
+#include "sourcehook/sourcehook_inline.h"
 
 // SH_IFACEPTR/RETURN_SH/RETURN_SH_VALUE/SET_SH_RESULT/SH_RESULT_ORIG_RET
 // (sourcehook_inline.h) always reference SH_GLOB_SHPTR (default: g_SHPtr) in

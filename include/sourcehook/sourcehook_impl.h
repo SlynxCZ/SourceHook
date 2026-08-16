@@ -481,37 +481,37 @@ namespace SourceHook
 			/**
 			*	@brief Returns the interface version
 			*/
-			int GetIfaceVersion();
+			int GetIfaceVersion() override;
 
 			/**
 			*	@brief Returns the implemnetation version
 			*/
-			int GetImplVersion();
+			int GetImplVersion() override;
 
 			int AddHook(Plugin plug, AddHookMode mode, void *iface, int thisptr_offs, HookManagerPubFunc myHookMan,
-				ISHDelegate *handler, bool post);
+				ISHDelegate *handler, bool post) override;
 
 			bool RemoveHook(Plugin plug, void *iface, int thisptr_offs, HookManagerPubFunc myHookMan,
-				ISHDelegate *handler, bool post);
+				ISHDelegate *handler, bool post) override;
 
-			bool RemoveHookByID(int hookid);
+			bool RemoveHookByID(int hookid) override;
 
-			bool PauseHookByID(int hookid);
-			bool UnpauseHookByID(int hookid);
+			bool PauseHookByID(int hookid) override;
+			bool UnpauseHookByID(int hookid) override;
 
-			void SetRes(META_RES res);				//!< Sets the meta result
-			META_RES GetPrevRes();					//!< Gets the meta result of the
+			void SetRes(META_RES res) override;			//!< Sets the meta result
+			META_RES GetPrevRes() override;				//!< Gets the meta result of the
 													//!<  previously calledhandler
-			META_RES GetStatus();					//!< Gets the highest meta result
-			const void *GetOrigRet();				//!< Gets the original result.
+			META_RES GetStatus() override;					//!< Gets the highest meta result
+			const void *GetOrigRet() override;				//!< Gets the original result.
 													//!<  If not in post function, undefined
-			const void *GetOverrideRet();			//!< Gets the override result.
+			const void *GetOverrideRet() override;			//!< Gets the override result.
 													//!<  If none is specified, NULL
-			void *GetIfacePtr();					//!< Gets the interface pointer
+			void *GetIfacePtr() override;					//!< Gets the interface pointer
 
-			void *GetOverrideRetPtr();				//!< Used for setting the override return value
+			void *GetOverrideRetPtr() override;				//!< Used for setting the override return value
 
-			/* 
+			/*
 			 * @brief Make sure that a plugin is not used by any
 			 * other plugins anymore, and unregister all its hook
 			 * managers. If any hooks owned by this plugin are
@@ -522,21 +522,21 @@ namespace SourceHook
 
 			void ResolvePendingUnloads(bool force = false);
 
-			void RemoveHookManager(Plugin plug, HookManagerPubFunc pubFunc);
+			void RemoveHookManager(Plugin plug, HookManagerPubFunc pubFunc) override;
 
-			void SetIgnoreHooks(void *vfnptr);
-			void ResetIgnoreHooks(void *vfnptr);
+			void SetIgnoreHooks(void *vfnptr) override;
+			void ResetIgnoreHooks(void *vfnptr) override;
 
-			void DoRecall();
+			void DoRecall() override;
 
 			void LogDebug(const char *pFormat, ...) override;
 
 			IHookContext *SetupHookLoop(IHookManagerInfo *hi, void *vfnptr, void *thisptr, void **origCallAddr, META_RES *statusPtr,
-				META_RES *prevResPtr, META_RES *curResPtr, const void *origRetPtr, void *overrideRetPtr);
+				META_RES *prevResPtr, META_RES *curResPtr, const void *origRetPtr, void *overrideRetPtr) override;
 
-			void EndContext(IHookContext *pCtx);
+			void EndContext(IHookContext *pCtx) override;
 
-			void *GetOrigVfnPtrEntry(void *vfnptr);
+			void *GetOrigVfnPtrEntry(void *vfnptr) override;
 
 			/**
 			*	@brief Shut down the whole system, unregister all hook managers
