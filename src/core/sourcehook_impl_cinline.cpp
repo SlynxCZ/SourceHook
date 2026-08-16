@@ -8,7 +8,7 @@
 * ============================
 */
 
-#include "../../include/sourcehook/sourcehook_impl_inline.h"
+#include "../../include/sourcehook/sourcehook_impl_cinline.h"
 
 namespace SourceHook
 {

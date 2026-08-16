@@ -117,7 +117,7 @@
 
 #include "sourcehook.h"
 #include "FastDelegate.h"
-#include "sourcehook_impl_inline.h"
+#include "sourcehook_impl_cinline.h"
 #include "safetyhook.hpp"
 
 namespace SourceHook

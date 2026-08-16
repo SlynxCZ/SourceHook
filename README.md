@@ -49,7 +49,7 @@ either sub-build convention below).
   hook styles' declare macros — live together, and which now `#include`s
   `sourcehook_inline.h` itself too, see "Three hook styles, one header"
   below), `sourcehook_inline.h`, `sourcehook_impl*.h`,
-  `sourcehook_impl_inline.h`, `sourcehook_metamod_override.h` (opt a
+  `sourcehook_impl_cinline.h`, `sourcehook_metamod_override.h` (opt a
   metamod:source plugin out of the server's shared SourceHook and onto a
   private instance of this one), and the low-level building blocks they all
   need (`sh_*.h`, `FastDelegate.h`).
