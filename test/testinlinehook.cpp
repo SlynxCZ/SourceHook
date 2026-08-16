@@ -347,6 +347,56 @@ bool TestInlineHookMetaMacros(std::string &error)
 	return true;
 }
 
+// -------------------- SH_DECL_INLINEHOOK*_void --------------------
+//
+// The _void family just drops `rettype` (hardcoded to void) -- same
+// relationship SH_DECL_HOOKn_void/SH_DECL_MANUALHOOKn_void already have to
+// their rettype-taking counterparts. Exercises that the generated macro
+// actually compiles and dispatches correctly, not just that it expands.
+
+SH_DECL_INLINEHOOK1_void(TestInlineVoidHook, void, int);
+
+namespace
+{
+	int g_VoidHookLastArg = -1;
+	bool g_VoidHookOrigCalled = false;
+
+	void __attribute__((noinline)) TargetVoidHook(int x)
+	{
+		g_VoidHookOrigCalled = true;
+		volatile int y = x;
+		asm volatile(
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			::: "memory");
+		(void)y;
+	}
+
+	void VoidHookPre(int x)
+	{
+		g_VoidHookLastArg = x;
+	}
+}
+
+bool TestInlineHookVoidDecl(std::string &error)
+{
+	void *addr = reinterpret_cast<void *>(&TargetVoidHook);
+
+	int id = SH_ADD_INLINEHOOK(TestInlineVoidHook, addr, SH_STATIC(VoidHookPre), false);
+	CHECK(id != 0, "SH_DECL_INLINEHOOK1_void: failed to register the Pre handler");
+
+	g_VoidHookOrigCalled = false;
+	TargetVoidHook(42);
+
+	CHECK(g_VoidHookLastArg == 42, "SH_DECL_INLINEHOOK1_void: Pre handler did not see the argument");
+	CHECK(g_VoidHookOrigCalled, "SH_DECL_INLINEHOOK1_void: the real original was not called");
+
+	CHECK(SH_REMOVE_INLINEHOOK(TestInlineVoidHook, addr, SH_STATIC(VoidHookPre), false),
+		"SH_DECL_INLINEHOOK1_void: failed to remove the Pre handler");
+
+	return true;
+}
+
 // -------------------- concurrency stress test --------------------
 //
 // Reproduces, under real concurrent threads, the exact race the

@@ -18,6 +18,7 @@
 
 bool TestInlineHook(std::string &error);
 bool TestInlineHookMetaMacros(std::string &error);
+bool TestInlineHookVoidDecl(std::string &error);
 bool TestInlineHookConcurrency(std::string &error);
 
 int main()
@@ -36,6 +37,13 @@ int main()
 		return 1;
 	}
 	std::cout << "TestInlineHookMetaMacros passed" << std::endl;
+
+	if (!TestInlineHookVoidDecl(error))
+	{
+		std::cout << "TestInlineHookVoidDecl FAILED: " << error << std::endl;
+		return 1;
+	}
+	std::cout << "TestInlineHookVoidDecl passed" << std::endl;
 
 	if (!TestInlineHookConcurrency(error))
 	{

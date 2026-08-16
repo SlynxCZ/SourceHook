@@ -14,10 +14,25 @@ namespace SourceHook
 {
 	namespace Impl
 	{
+		namespace
+		{
+			// Namespace-scope, not a function-local static: a plugin build
+			// commonly compiles with -fno-threadsafe-statics (this repo's
+			// own AMBuildScript does, matching InventoryManager_mm_es's) --
+			// that flag removes the compiler-generated guard variable that
+			// would otherwise make a function-local static's first-use
+			// initialization safe against two threads racing to call Get()
+			// for the very first time concurrently. A namespace-scope
+			// object like this one instead gets ordinary dynamic
+			// initialization at library-load time, before any application
+			// thread (or even Load()) could possibly reach it -- there's no
+			// "first concurrent call" race left to have.
+			CInlineHookAddressGuard g_InlineHookAddressGuardInstance;
+		}
+
 		CInlineHookAddressGuard &CInlineHookAddressGuard::Get()
 		{
-			static CInlineHookAddressGuard s_Instance;
-			return s_Instance;
+			return g_InlineHookAddressGuardInstance;
 		}
 
 		bool CInlineHookAddressGuard::Claim(void *addr, const std::type_info &sig)

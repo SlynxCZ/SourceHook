@@ -30,8 +30,12 @@ HEADER = """/* ======== SourceHook ========
 * GENERATED FILE -- do not edit by hand.
 * Regenerate with: python3 generate/gen_inline_hooks.py
 *
-* Declares SH_DECL_INLINEHOOK0..{max_arity}, the inline-hook counterpart of
-* upstream's SH_DECL_MANUALHOOK0..20 (see sourcehook.h). Each macro declares
+* Declares SH_DECL_INLINEHOOK0..{max_arity} and SH_DECL_INLINEHOOK0..{max_arity}_void,
+* the inline-hook counterpart of upstream's SH_DECL_MANUALHOOK0..20 (and its
+* own _void family) -- see sourcehook.h. The _void form just drops `rettype`
+* (hardcoded to void), same relationship SH_DECL_HOOKn_void/
+* SH_DECL_MANUALHOOKn_void already have to their non-_void counterparts.
+* Each macro declares
 * a SourceHookInlineDecl::<hookname>_Tag type carrying the
 * SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1..N>
 * specialization that SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK
@@ -57,12 +61,19 @@ HEADER = """/* ======== SourceHook ========
 FOOTER = "\n#endif //__SOURCEHOOK_INLINE_DECL_H__\n"
 
 
-def emit_macro(n):
+def emit_macro(n, void_variant=False):
   params = [f'param{i}' for i in range(1, n + 1)]
-  arg_list = ', '.join(['hookname', 'thisclass', 'rettype'] + params)
-  template_args = ', '.join(['thisclass', 'rettype'] + params)
+  macro_name = f'SH_DECL_INLINEHOOK{n}' + ('_void' if void_variant else '')
+  # The _void variant drops `rettype` from the argument list entirely and
+  # hardcodes it to void in the template args below -- same relationship
+  # SH_DECL_HOOKn_void/SH_DECL_MANUALHOOKn_void already have to their
+  # rettype-taking counterparts (see sourcehook.h): a void-returning hook is
+  # common enough that not having to spell out "void" is worth a second
+  # macro, rather than making every caller write it explicitly.
+  arg_list = ', '.join(['hookname', 'thisclass'] + ([] if void_variant else ['rettype']) + params)
+  template_args = ', '.join(['thisclass', 'void' if void_variant else 'rettype'] + params)
   lines = []
-  lines.append(f'#define SH_DECL_INLINEHOOK{n}({arg_list}) \\')
+  lines.append(f'#define {macro_name}({arg_list}) \\')
   lines.append('\tnamespace SourceHookInlineDecl { \\')
   lines.append('\t\tstruct hookname##_Tag \\')
   lines.append('\t\t{ \\')
@@ -95,6 +106,7 @@ def main():
     f.write(HEADER)
     for n in range(0, MAX_ARITY + 1):
       f.write(emit_macro(n))
+      f.write(emit_macro(n, void_variant=True))
     f.write(FOOTER)
   print(f'Wrote {out_path}')
 

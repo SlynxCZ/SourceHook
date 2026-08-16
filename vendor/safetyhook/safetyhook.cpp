@@ -19,7 +19,10 @@
 //
 
 // This is the OS abstraction layer.
-#pragma once
+// #pragma once removed here (harmless leftover from amalgamate.py
+// concatenating safetyhook/os.hpp's own header content directly into this
+// .cpp -- inert in a .cpp translation unit, just noisy: -Wpragma-once-
+// outside-header on every build).
 
 #ifndef SAFETYHOOK_USE_CXXMODULES
 #include <cstdint>

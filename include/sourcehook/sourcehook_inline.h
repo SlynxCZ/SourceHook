@@ -223,6 +223,49 @@ namespace SourceHook
 		template <typename ThisClass, typename Ret, typename... Args>
 		class CInlineDispatcher
 		{
+			// A pointer here (SH_DECL_INLINEHOOKn(hookname, SomeClass*, ...))
+			// is (almost) always a mistake, not an alternate valid spelling:
+			// `thisclass` names the CLASS a real this-pointer points AT
+			// (SomeClass), same as SH_DECL_MANUALHOOK/SH_DECL_HOOK's
+			// `iface` parameter -- it is not itself the pointer type. Writing
+			// `SomeClass*` doesn't turn "this" into a plain leading argument
+			// either; the dispatcher still treats it exactly like a real
+			// this-pointer (retrieved via SH_IFACEPTR(SomeClass*) in the
+			// handler, never as an explicit parameter -- Handler's own type
+			// above is built from Args... alone regardless of ThisClass), it
+			// just does it through an extra, spurious level of pointer
+			// indirection. On the SysV x86_64 ABI this whole file is scoped
+			// to, that extra indirection happens to be harmless in the one
+			// narrow sense that a pointer's bit pattern doesn't depend on
+			// what it points to -- calling convention-wise, "this-pointer"
+			// and "first plain pointer argument" are already byte-identical
+			// (see this file's own header comment) -- so the *value* that
+			// ends up in SHINT_INLINE_IFACEPTR/SH_IFACEPTR is unaffected.
+			// What does NOT come along for free is correctness against a
+			// class with a non-zero this-pointer adjustment (multiple/
+			// virtual inheritance) -- there is no thisptroffs support here
+			// (see the file header), pointer or not -- and, far more likely
+			// in practice, a confused handler signature: if whoever declared
+			// this also assumed the pointer becoming "just a normal
+			// argument" meant they should add it as an explicit leading
+			// parameter on the handler function itself, Handler's still-
+			// Args...-only type means that handler now has the WRONG arity
+			// against every SH_STATIC/SH_MEMBER call site -- which does fail
+			// to compile (FastDelegate is strongly typed), just as a
+			// confusing template-internals error instead of this clear one.
+			// Reject the pointer form outright and say so plainly instead of
+			// letting any of that play out: declare `thisclass` as the class
+			// itself for a real this-pointer, or as void with the pointer as
+			// a normal leading entry in Args... if there genuinely isn't one.
+			static_assert(!std::is_pointer_v<ThisClass>,
+				"SH_DECL_INLINEHOOK*: thisclass must be the class itself (e.g. CCSPlayerPawn), "
+				"not a pointer to it (CCSPlayerPawn*) -- a pointer here doesn't mean \"no real "
+				"this pointer, treat it as a normal argument\", it's still handled as a this-"
+				"pointer (via SH_IFACEPTR in the handler, not as an explicit parameter), just "
+				"with a spurious extra level of indirection. If there genuinely is no this "
+				"pointer, declare thisclass as void instead and put the pointer as a normal "
+				"leading entry in Args... -- and give the handler an explicit parameter for it.");
+
 		public:
 			// Handlers have the hooked function's own real signature -- no
 			// `this` in here regardless of ThisClass, same as a typed/manual
@@ -339,27 +382,54 @@ namespace SourceHook
 
 			CInlineDispatcher() = default;
 
+			// s_Map/s_Map_Mutex/s_SlotTable below are `inline static` DATA
+			// MEMBERS (C++17), not function-local statics -- deliberately.
+			// A plugin build commonly compiles with -fno-threadsafe-statics
+			// (this repo's own AMBuildScript does, matching
+			// InventoryManager_mm_es's own), which removes the compiler-
+			// generated guard variable that would otherwise make a
+			// function-local static's first-use initialization safe against
+			// two threads racing to call Map()/Map_Mutex() for the very
+			// first time concurrently -- without it, the FIRST ever
+			// concurrent SH_ADD_INLINEHOOK/SH_CALL/etc. calls on two
+			// threads could race to construct the same std::mutex or
+			// std::unordered_map object twice, corrupting it before it's
+			// ever used (this is exactly the kind of bug that reproduces in
+			// an optimized/AMBuild release build but not a CMake dev build
+			// with default, standard-mandated thread-safe statics). A
+			// static DATA member instead gets ordinary dynamic
+			// initialization once, at library-load time, before any
+			// application thread could possibly reach it -- there's no
+			// "first concurrent call" race left to have. One instance per
+			// distinct (ThisClass, Ret, Args...) instantiation, same as
+			// before.
 			static std::unordered_map<void *, CInlineDispatcher *> &Map()
 			{
-				static std::unordered_map<void *, CInlineDispatcher *> s_Map;
 				return s_Map;
 			}
 
 			static std::mutex &Map_Mutex()
 			{
-				static std::mutex s_Mutex;
-				return s_Mutex;
+				return s_Map_Mutex;
 			}
 
 			static auto &SlotTable()
 			{
-				static auto s_Table = []<std::size_t... Is>(std::index_sequence<Is...>) {
+				return s_SlotTable;
+			}
+
+			static auto ComputeSlotTable()
+			{
+				return []<std::size_t... Is>(std::index_sequence<Is...>) {
 					return std::array<RawFn, sizeof...(Is)>{
 						&InlineTrampolineSlot<Is, ThisClass, Ret, Args...>::Fn...
 					};
 				}(std::make_index_sequence<kMaxConcurrentTargets>{});
-				return s_Table;
 			}
+
+			inline static std::unordered_map<void *, CInlineDispatcher *> s_Map;
+			inline static std::mutex s_Map_Mutex;
+			inline static decltype(ComputeSlotTable()) s_SlotTable = ComputeSlotTable();
 
 			bool Install(void *addr)
 			{
