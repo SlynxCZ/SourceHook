@@ -38,7 +38,16 @@ namespace SourceHook
 
 			std::int32_t AddVarToFrame(std::int32_t size);
 			std::int32_t ComputeVarsSize();
-			std::int32_t x64GenContext::GetRealSize(const IntPassInfo& info);
+			// Was `std::int32_t x64GenContext::GetRealSize(...)` -- an
+			// erroneous self-qualification on a plain in-class member
+			// declaration (illegal; every other declaration around it is
+			// unqualified). Pre-existing in real upstream metamod-source too
+			// (same file, same line) -- apparently never caught because
+			// older/more permissive MSVC toolchains tolerated it; a recent
+			// MSVC (this is the actual failure this fixes, alongside the
+			// `xor` one above) correctly rejects it as
+			// "illegal qualified name in member declaration".
+			std::int32_t GetRealSize(const IntPassInfo& info);
 			std::int32_t AlignSize(std::int32_t x, std::int32_t boundary);
 			std::int32_t GetParamStackSize(const IntPassInfo &info);
 
