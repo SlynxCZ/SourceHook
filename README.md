@@ -54,7 +54,7 @@ either sub-build convention below).
   private instance of this one), and the low-level building blocks they all
   need (`sh_*.h`, `FastDelegate.h`).
 - `src/` — the engine's own `.cpp` implementation (`sourcehook.cpp`,
-  `sourcehook_impl_*.cpp`, `sourcehook_impl_inline.cpp`). Copied from
+  `sourcehook_impl_*.cpp`, `sourcehook_impl_cinline.cpp`). Copied from
   `metamod-source/core/sourcehook` unmodified except for removing a dead,
   metamod-only debug helper (see "Decoupling from metamod" below).
 - `src/hookmangen/` — the vtable-hook JIT code generator

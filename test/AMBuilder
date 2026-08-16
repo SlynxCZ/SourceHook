@@ -58,8 +58,12 @@ for cxx in SHook.all_targets:
     binary.sources += [
       'main_inline.cpp',
       'testinlinehook.cpp',
-      os.path.join('..', 'src', 'inline', 'sourcehook_impl_inline.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_cinline.cpp'),
     ]
     SHook.AddVendorSources(binary)
     SHook.AddPublicIncludes(binary)
+    # TestInlineHookConcurrency (testinlinehook.cpp) uses std::thread --
+    # glibc needs -pthread for pthread_create at link time (the CMake build
+    # gets this via find_package(Threads REQUIRED) + Threads::Threads).
+    binary.compiler.linkflags += ['-pthread']
     builder.Add(binary)

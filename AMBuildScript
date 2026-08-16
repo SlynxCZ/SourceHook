@@ -208,10 +208,10 @@ class SourceHookConfig(object):
         os.path.join('src', 'core', 'sourcehook.cpp'),
         os.path.join('src', 'core', 'sourcehook_impl_chookidman.cpp'),
         os.path.join('src', 'core', 'sourcehook_impl_chookmaninfo.cpp'),
+        os.path.join('src', 'core', 'sourcehook_impl_cinline.cpp'),
         os.path.join('src', 'core', 'sourcehook_impl_cproto.cpp'),
         os.path.join('src', 'core', 'sourcehook_impl_cvfnptr.cpp'),
         os.path.join('src', 'hookmangen', 'sourcehook_hookmangen.cpp'),
-        os.path.join('src', 'inline', 'sourcehook_impl_inline.cpp'),
       ]
 
       if cxx.target.arch == 'x86':
