@@ -19,6 +19,7 @@
 bool TestInlineHook(std::string &error);
 bool TestInlineHookMetaMacros(std::string &error);
 bool TestInlineHookVoidDecl(std::string &error);
+bool TestInlineHookGetOriginal(std::string &error);
 bool TestInlineHookConcurrency(std::string &error);
 
 int main()
@@ -44,6 +45,13 @@ int main()
 		return 1;
 	}
 	std::cout << "TestInlineHookVoidDecl passed" << std::endl;
+
+	if (!TestInlineHookGetOriginal(error))
+	{
+		std::cout << "TestInlineHookGetOriginal FAILED: " << error << std::endl;
+		return 1;
+	}
+	std::cout << "TestInlineHookGetOriginal passed" << std::endl;
 
 	if (!TestInlineHookConcurrency(error))
 	{

@@ -80,6 +80,17 @@ def emit_macro(n, void_variant=False):
   lines.append(f'\t\t\tusing Dispatcher = ::SourceHook::Impl::CInlineDispatcher<{template_args}>; \\')
   lines.append('\t\t\tusing ThisClassT = thisclass; \\')
   lines.append(f'\t\t\tusing Callable = ::SourceHook::Impl::InlineExecutable<{template_args}>; \\')
+  # Backing store for SH_GET_INLINEHOOK_ORIGINAL(hookname, targetAddr) (see
+  # sourcehook_inline.h): a plain, capture-free C function pointer -- of
+  # exactly this hook's own real signature -- that always calls through to
+  # whatever the *current* original is for targetAddr, for the rare external
+  # caller that needs a real function pointer to store (e.g. in another
+  # plugin's own extern fn-ptr global) rather than going through SH_CALL/a
+  # SourceHook handler chain. Keyed by hookname##_Tag (not bare
+  # <thisclass, rettype, param1..N>) so two different hooknames that happen
+  # to share an identical signature don't collide on the same trampoline's
+  # recorded address.
+  lines.append(f'\t\t\tusing OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, {template_args}>; \\')
   lines.append('\t\t}; \\')
   # A *value* named `hookname` (not just a type) -- SH_CALL(hookname, addr)
   # needs to pass it as an argument for C++ overload resolution to pick the

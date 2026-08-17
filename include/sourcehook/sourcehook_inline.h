@@ -659,6 +659,11 @@ namespace SourceHook
 			template <typename T2, typename R2, typename... A2>
 			friend class InlineExecutable;
 
+			// SH_GET_INLINEHOOK_ORIGINAL's trampoline (below) also calls
+			// CallOriginal() directly, same reason as the two friends above.
+			template <typename HT2, typename T2, typename R2, typename... A2>
+			friend struct InlineOriginalTrampoline;
+
 			void *m_TargetAddr = nullptr;
 			safetyhook::InlineHook m_Hook;
 			std::vector<std::uint8_t> m_InstalledBytes; // see HardUninstall()
@@ -716,6 +721,82 @@ namespace SourceHook
 			void *m_Addr;
 			ThisClass *m_This;
 		};
+
+		// Backs SH_GET_INLINEHOOK_ORIGINAL(hookname, targetAddr): a genuine,
+		// capture-free C function pointer -- of exactly this hook's own real
+		// signature (InlineRawFn<ThisClass, Ret, Args...>::Type) -- that can
+		// be stored in a plain `extern` fn-ptr global another TU calls
+		// directly, for the (rare) case an inline hook's "call the current
+		// original" needs to be reachable from *outside* SourceHook's own
+		// SH_CALL/handler-chain machinery entirely. InlineExecutable (what
+		// SH_CALL itself returns) can't serve that role: it's an object
+		// bound to one (addr, thisptr) pair per call site, not a plain
+		// function pointer -- there is no way to "unbind" a capturing
+		// callable back into a raw fn ptr in C++. This sidesteps that by
+		// giving each declared hookname exactly one static, capture-free
+		// trampoline slot (parallel to InlineTrampolineSlot's per-address
+		// slot pool above, but per-hookname instead, and pointing at
+		// CallOriginal() instead of RunChain()) that remembers `targetAddr`
+		// in a plain static instead of a closure. `HookTag` (the
+		// hookname##_Tag type SH_DECL_INLINEHOOK* generates) is what makes
+		// this per-hookname rather than per-(ThisClass, Ret, Args...): two
+		// different hooknames sharing an identical signature would otherwise
+		// collide on the same specialization's static storage the same way
+		// InlineTrampolineSlot would if it weren't keyed by an index.
+		//
+		// Correct even if SH_GET_INLINEHOOK_ORIGINAL is called before,
+		// after, or without a matching SH_ADD_INLINEHOOK ever running for
+		// this address: `s_Addr` is just remembered eagerly, and Find(addr)
+		// is re-resolved on every call through the returned pointer, not
+		// once at "get" time -- same lazy-lookup contract InlineExecutable
+		// itself already has. If nothing is (yet, or ever) hooked at
+		// s_Addr, that's the correct signal that the bytes there already
+		// *are* the untouched original, so the fallback below calls straight
+		// through them.
+		template <typename HookTag, typename ThisClass, typename Ret, typename... Args>
+		struct InlineOriginalTrampoline
+		{
+			static inline void *s_Addr = nullptr;
+
+			static Ret SHINT_INLINE_CALLCONV Fn(ThisClass *pThis, Args... args)
+			{
+				using Dispatcher = CInlineDispatcher<ThisClass, Ret, Args...>;
+				if (Dispatcher *disp = Dispatcher::Find(s_Addr))
+					return disp->CallOriginal(pThis, args...);
+
+				using RawFn = typename InlineRawFn<ThisClass, Ret, Args...>::Type;
+				return reinterpret_cast<RawFn>(s_Addr)(pThis, args...);
+			}
+		};
+
+		// thisclass == void: no leading parameter, same split InlineRawFn/
+		// InlineTrampolineSlot already have above.
+		template <typename HookTag, typename Ret, typename... Args>
+		struct InlineOriginalTrampoline<HookTag, void, Ret, Args...>
+		{
+			static inline void *s_Addr = nullptr;
+
+			static Ret SHINT_INLINE_CALLCONV Fn(Args... args)
+			{
+				using Dispatcher = CInlineDispatcher<void, Ret, Args...>;
+				if (Dispatcher *disp = Dispatcher::Find(s_Addr))
+					return disp->CallOriginal(nullptr, args...);
+
+				using RawFn = typename InlineRawFn<void, Ret, Args...>::Type;
+				return reinterpret_cast<RawFn>(s_Addr)(args...);
+			}
+		};
+
+		// `hookname` is the SH_DECL_INLINEHOOK*-generated Tag value (same
+		// argument SH_ADD_INLINEHOOK/SH_CALL already take); returns a plain
+		// fn ptr of that hook's own RawFn type, permanently wired to replay
+		// a lookup against `addr`.
+		template <typename HookTag>
+		typename HookTag::Dispatcher::RawFn GetInlineHookOriginal(HookTag, void *addr)
+		{
+			HookTag::OriginalTrampoline::s_Addr = addr;
+			return &HookTag::OriginalTrampoline::Fn;
+		}
 
 		// The un-templated, thisclass-erased form MakeInlineCallable() below
 		// needs: SH_DECL_INLINEHOOK* generates a `HookTag` value (see
@@ -992,5 +1073,22 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 // macro name, auto-detects" spirit as SH_IFACEPTR/RETURN_SH.
 #define SH_CALL_INLINE3(hookname, targetAddr, thisptr) \
 	::SourceHook::Impl::MakeInlineCallable(SourceHookInlineDecl::hookname, (targetAddr), (thisptr))
+
+// SH_GET_INLINEHOOK_ORIGINAL(hookname, targetAddr): returns a plain,
+// capture-free C function pointer -- of exactly `hookname`'s own declared
+// signature -- that always calls through to whatever the *current* original
+// is for targetAddr. For the (rare) case some other, unrelated piece of code
+// needs to store "call the real original" as a genuine fn ptr (e.g. an
+// extern global another plugin/TU calls directly) instead of going through
+// SH_CALL or a SourceHook handler chain -- SH_CALL's own InlineExecutable
+// can't fill that role since it's a bound object, not an unbindable raw
+// pointer (see InlineOriginalTrampoline's own comment, above). Safe to call
+// before, after, or even without a matching SH_ADD_INLINEHOOK for the same
+// address ever running -- same lazy, "no dispatcher yet means untouched
+// original" contract SH_CALL itself already has. Independent of whether
+// this hookname is ALSO used normally via SH_ADD_INLINEHOOK/SH_CALL; nothing
+// about using one precludes the other.
+#define SH_GET_INLINEHOOK_ORIGINAL(hookname, targetAddr) \
+	::SourceHook::Impl::GetInlineHookOriginal(SourceHookInlineDecl::hookname, (targetAddr))
 
 #endif //__SOURCEHOOK_INLINE_H__

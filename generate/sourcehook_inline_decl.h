@@ -42,6 +42,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -54,6 +55,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -66,6 +68,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -78,6 +81,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -90,6 +94,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -102,6 +107,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -114,6 +120,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -126,6 +133,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -138,6 +146,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -150,6 +159,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -162,6 +172,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -174,6 +185,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -186,6 +198,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -198,6 +211,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -210,6 +224,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -222,6 +237,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -234,6 +250,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -246,6 +263,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -258,6 +276,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -270,6 +289,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -282,6 +302,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -294,6 +315,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -306,6 +328,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -318,6 +341,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -330,6 +354,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -342,6 +367,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -354,6 +380,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -366,6 +393,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -378,6 +406,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -390,6 +419,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -402,6 +432,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -414,6 +445,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -426,6 +458,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -438,6 +471,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -450,6 +484,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -462,6 +497,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -474,6 +510,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -486,6 +523,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -498,6 +536,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -510,6 +549,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -522,6 +562,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, rettype, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \
@@ -534,6 +575,7 @@
 			using Dispatcher = ::SourceHook::Impl::CInlineDispatcher<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20>; \
 			using ThisClassT = thisclass; \
 			using Callable = ::SourceHook::Impl::InlineExecutable<thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20>; \
+			using OriginalTrampoline = ::SourceHook::Impl::InlineOriginalTrampoline<hookname##_Tag, thisclass, void, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20>; \
 		}; \
 		inline constexpr hookname##_Tag hookname{}; \
 	} \

@@ -397,6 +397,87 @@ bool TestInlineHookVoidDecl(std::string &error)
 	return true;
 }
 
+// -------------------- SH_GET_INLINEHOOK_ORIGINAL --------------------
+//
+// Exercises the plain-fn-ptr escape hatch: some external code (not itself a
+// SourceHook handler, doesn't want SH_CALL's bound-object ergonomics) stores
+// "call the current original" as a genuine `Ret(*)(Args...)` global, the way
+// e.g. FUNPLAY-CS2's Hooks::CBaseEntity_TakeDamageOld is consumed from
+// schema headers outside any hooks/ TU. Both the free-function and the
+// member-function (`this`-having) forms, and both "requested before a
+// handler is ever added" and "requested after" -- GetOriginal's whole point
+// is that it doesn't matter which order these happen in.
+
+SH_DECL_INLINEHOOK1(TestInlineGetOriginalFree, void, int, int);
+SH_DECL_INLINEHOOK1(TestInlineGetOriginalMember, Adder, int, int);
+
+namespace
+{
+	int __attribute__((noinline)) TargetGetOriginalFree(int x)
+	{
+		volatile int y = x + 7;
+		asm volatile(
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			::: "memory");
+		return y + 0;
+	}
+
+	int GetOriginalFreePre(int)
+	{
+		// Would break the test if GetOriginal's caller ever ran through this
+		// handler chain instead of straight to the real original.
+		RETURN_SH_VALUE(MRES_SUPERCEDE, -1);
+	}
+
+	int GetOriginalMemberPre(int)
+	{
+		RETURN_SH_VALUE(MRES_SUPERCEDE, -1);
+	}
+}
+
+bool TestInlineHookGetOriginal(std::string &error)
+{
+	void *freeAddr = reinterpret_cast<void *>(&TargetGetOriginalFree);
+
+	// Requested BEFORE any SH_ADD_INLINEHOOK for this address -- must still
+	// resolve correctly once one is added later (s_Addr is remembered
+	// eagerly; the dispatcher lookup happens lazily on each call).
+	auto originalFree = SH_GET_INLINEHOOK_ORIGINAL(TestInlineGetOriginalFree, freeAddr);
+	CHECK(originalFree(5) == 12, "GetOriginal (free fn, no hook installed yet) did not reach the real original");
+
+	int id = SH_ADD_INLINEHOOK(TestInlineGetOriginalFree, freeAddr, SH_STATIC(GetOriginalFreePre), false);
+	CHECK(id != 0, "failed to install the superceding handler");
+
+	CHECK(TargetGetOriginalFree(5) == -1, "sanity: the superceding handler should be live via a normal call");
+	CHECK(originalFree(5) == 12, "GetOriginal (free fn) did not bypass the superceding handler after it was installed");
+
+	CHECK(SH_REMOVE_INLINEHOOK(TestInlineGetOriginalFree, freeAddr, SH_STATIC(GetOriginalFreePre), false),
+		"failed to remove the superceding handler");
+	CHECK(originalFree(5) == 12, "GetOriginal (free fn) result changed after the handler was removed");
+
+	// Member-function form: requested AFTER the hook already exists this
+	// time, and the returned pointer's signature must be exactly
+	// `int(*)(Adder*, int)` -- i.e. directly assignable to the same plain
+	// fn-ptr type a raw signature-scan + safetyhook detour would have used.
+	volatile Adder adder{ 20 };
+	Adder *pAdder = const_cast<Adder *>(&adder);
+	void *memberAddr = MemberFuncAddr(&Adder::Add);
+
+	int idMember = SH_ADD_INLINEHOOK(TestInlineGetOriginalMember, memberAddr, SH_STATIC(GetOriginalMemberPre), false);
+	CHECK(idMember != 0, "failed to install the member superceding handler");
+
+	int (*originalMember)(Adder *, int) = SH_GET_INLINEHOOK_ORIGINAL(TestInlineGetOriginalMember, memberAddr);
+	CHECK(pAdder->Add(5) == -1, "sanity: the superceding member handler should be live via a normal call");
+	CHECK(originalMember(pAdder, 5) == 25, "GetOriginal (member fn) did not bypass the superceding handler and reach the real Adder::Add");
+
+	CHECK(SH_REMOVE_INLINEHOOK(TestInlineGetOriginalMember, memberAddr, SH_STATIC(GetOriginalMemberPre), false),
+		"failed to remove the member superceding handler");
+	CHECK(originalMember(pAdder, 5) == 25, "GetOriginal (member fn) result changed after the handler was removed");
+
+	return true;
+}
+
 // -------------------- concurrency stress test --------------------
 //
 // Reproduces, under real concurrent threads, the exact race the
