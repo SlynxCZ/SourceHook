@@ -925,11 +925,27 @@ SourceHook::CallClass<T> *SH_GET_CALLCLASS(T *p)
 		static ::SourceHook::ProtoInfo ms_Proto; \
 		SHINT_MAKE_HOOKMANPUBFUNC(ifacetype, ifacefunc, overload, funcptr)
 
+// hidden, deliberately -- same reasoning as SH_MANUALHOOK_STATICS_HIDDEN
+// (SHINT_MAKE_GENERICSTUFF_END_MANUAL, below) applies here too: pre-C++17,
+// non-`inline` out-of-class static definitions get external linkage +
+// default visibility under this project's whole-build -fvisibility=default.
+// Keyed by (ifacetype, ifacefunc, overload) rather than an arbitrary
+// hookname, and not always namespace-qualified (a plugin can legally
+// SH_DECL_HOOK* at file scope, as e.g. a third-party plugin's own plugin.cpp
+// does) -- so two independently-compiled .so's hooking the exact same
+// (ifacetype, ifacefunc) pair at matching scope would collide on this
+// symbol too, same interposition risk as g_SourceHookImpl.
+#if defined(__GNUC__) || defined(__clang__)
+#define SH_HOOK_STATICS_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define SH_HOOK_STATICS_HIDDEN
+#endif
+
 #define SHINT_MAKE_GENERICSTUFF_END(ifacetype, ifacefunc, overload, funcptr) \
 	}; \
-	SH_FHCls(ifacetype,ifacefunc,overload) SH_FHCls(ifacetype,ifacefunc,overload)::ms_Inst; \
-	::SourceHook::MemFuncInfo SH_FHCls(ifacetype,ifacefunc,overload)::ms_MFI; \
-	::SourceHook::IHookManagerInfo *SH_FHCls(ifacetype,ifacefunc,overload)::ms_HI; \
+	SH_HOOK_STATICS_HIDDEN SH_FHCls(ifacetype,ifacefunc,overload) SH_FHCls(ifacetype,ifacefunc,overload)::ms_Inst; \
+	SH_HOOK_STATICS_HIDDEN ::SourceHook::MemFuncInfo SH_FHCls(ifacetype,ifacefunc,overload)::ms_MFI; \
+	SH_HOOK_STATICS_HIDDEN ::SourceHook::IHookManagerInfo *SH_FHCls(ifacetype,ifacefunc,overload)::ms_HI; \
 	int __SourceHook_FHAdd##ifacetype##ifacefunc(void *iface, ::SourceHook::ISourceHook::AddHookMode mode, bool post, \
 		SH_FHCls(ifacetype,ifacefunc,overload)::FD handler) \
 	{ \
@@ -989,11 +1005,33 @@ SourceHook::CallClass<T> *SH_GET_CALLCLASS(T *p)
 			return 0; \
 		}
 
+// hidden, deliberately -- these are the out-of-class definitions for
+// SH_MFHCls(hookname)'s three static data members (declared just above, in
+// SHINT_MAKE_GENERICSTUFF_BEGIN_MANUAL). Pre-C++17 style (not `inline`), so
+// with this project's whole-build -fvisibility=default (makefiles/
+// linux.base.cmake) they get external linkage AND default (exported)
+// visibility -- same bug class as sourcehook_metamod_override.h's own
+// g_SourceHookImpl/g_pSourceHook (see that header's comment for the full
+// cross-.so-interposition mechanism this enables under dlopen(...,
+// RTLD_GLOBAL)). hookname is namespace-qualified by whichever plugin
+// expands SH_DECL_MANUALHOOK*, so an accidental collision needs two
+// *different* .so's declaring a manual hook with the identical namespace
+// AND hookname -- narrower odds than the single, bare g_SourceHookImpl
+// symbol every private-engine plugin defines, but the same class of risk,
+// and every SH_DECL_MANUALHOOK*/SH_ADD_MANUALDVPHOOK call site across this
+// whole plugin suite (CheckTransmit, PlayerRunCommand, Respawn, ...)
+// depends on it -- worth closing at the source rather than per call site.
+#if defined(__GNUC__) || defined(__clang__)
+#define SH_MANUALHOOK_STATICS_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define SH_MANUALHOOK_STATICS_HIDDEN
+#endif
+
 #define SHINT_MAKE_GENERICSTUFF_END_MANUAL(hookname, pvtbloffs, pvtblidx, pthisptroffs) \
 	}; \
-	SH_MFHCls(hookname) SH_MFHCls(hookname)::ms_Inst; \
-	::SourceHook::MemFuncInfo SH_MFHCls(hookname)::ms_MFI; \
-	::SourceHook::IHookManagerInfo *SH_MFHCls(hookname)::ms_HI; \
+	SH_MANUALHOOK_STATICS_HIDDEN SH_MFHCls(hookname) SH_MFHCls(hookname)::ms_Inst; \
+	SH_MANUALHOOK_STATICS_HIDDEN ::SourceHook::MemFuncInfo SH_MFHCls(hookname)::ms_MFI; \
+	SH_MANUALHOOK_STATICS_HIDDEN ::SourceHook::IHookManagerInfo *SH_MFHCls(hookname)::ms_HI; \
 	int __SourceHook_FHMAdd##hookname(void *iface, ::SourceHook::ISourceHook::AddHookMode mode, bool post, \
 		SH_MFHCls(hookname)::FD handler) \
 	{ \
