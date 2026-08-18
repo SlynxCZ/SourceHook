@@ -33,7 +33,16 @@
 //      this only matters for consumers that talk to a private ISourceHook
 //      instance from this fork (see sourcehook_metamod_override.h); plugins
 //      sharing metamod's own SourceHook still negotiate SH_IFACE_VERSION 5.
-#define SH_IFACE_VERSION 6
+//  7 - SlynxCZ/SourceHook fork: added ISourceHook::GetOrCreateInlineDispatcherStorage,
+//      a generic key -> blob store that lets sourcehook_inline.h's
+//      CInlineDispatcher<...> (and CInlineHookAddressGuard) delegate their
+//      otherwise per-.so static storage to whichever engine instance
+//      SH_GLOB_SHPTR is currently bound to -- what makes TWO plugins
+//      genuinely share one real inline-hook dispatcher/hardware detour
+//      for the same function purely via sourcehook_metamod_shared.h's
+//      runtime-bound pointer, no CMake link dependency between them
+//      needed, same as vtable hooks already work through this interface.
+#define SH_IFACE_VERSION 7
 
 // Impl versions:
 // ???
@@ -539,6 +548,55 @@ namespace SourceHook
 		virtual void EndContext(IHookContext *pCtx) = 0;
 
 	    virtual void LogDebug(const char *pFormat, ...) = 0;
+
+		/**
+		*	@brief Generic, type-erased key -> heap-allocated-blob store,
+		*		lazily populated on first request (find-or-create semantics).
+		*
+		*	Backs sourcehook_inline.h's CInlineDispatcher<...> (its own
+		*	per-(ThisClass,Ret,Args...) hook table + mutex) and
+		*	CInlineHookAddressGuard (sourcehook_impl_cinline.h) -- both are
+		*	otherwise per-.so `static`/`inline static` state, which is exactly
+		*	right for a plugin that fully owns its private engine
+		*	(sourcehook_metamod_override.h), but wrong the moment a SECOND
+		*	plugin needs to install/bypass an inline hook on a function a
+		*	FIRST plugin already hooked: each .so's own template statics
+		*	would never see the other's map, so they'd silently create two
+		*	independent hardware detours on the same address instead of
+		*	sharing one dispatcher.
+		*
+		*	Routing that storage through THIS interface instead fixes it for
+		*	free, with no extra plumbing needed in sourcehook_inline.h beyond
+		*	one lookup: SH_GLOB_SHPTR is already, by construction, either a
+		*	plugin's own private engine, or (sourcehook_metamod_shared.h) a
+		*	runtime-bound pointer at ANOTHER plugin's engine instance --
+		*	either way, this call is an ordinary virtual dispatch, so the
+		*	code that actually RUNS (and therefore the storage that actually
+		*	gets touched) is always the OWNING engine instance's own
+		*	compiled CSourceHookImpl, regardless of which plugin's .so made
+		*	the call -- no CMake link dependency between the two plugins
+		*	needed, same as every other ISourceHook method already works.
+		*
+		*	@param key		Identifies the blob -- e.g. a Dispatcher's own
+		*					typeid(...).name() (stable across independently-
+		*					compiled .so's for identical template arguments,
+		*					but NOT for a hook signature containing any
+		*					plugin-namespaced type -- see e.g. JailBreak/src/
+		*					hooks/Hooks.h's own comment on why
+		*					TerminateRoundHook is declared type-erased).
+		*	@param factory	Called (at most once per distinct key, for the
+		*					lifetime of this engine instance) to create the
+		*					blob if this is the first request for `key`.
+		*					Capture-free (a plain fn ptr, not std::function)
+		*					so callers never need to allocate a closure just
+		*					to ask for their own storage.
+		*	@return			The blob (existing or freshly created). Never
+		*					freed by this interface -- same permanent-for-
+		*					the-process-lifetime lifetime CInlineDispatcher
+		*					itself already has for its own hook objects (see
+		*					CInlineDispatcher::RemoveHook's own comment).
+		*/
+		virtual void *GetOrCreateInlineDispatcherStorage(const char *key, void *(*factory)()) = 0;
 	};
 
 

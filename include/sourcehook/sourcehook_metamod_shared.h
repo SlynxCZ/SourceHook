@@ -23,6 +23,37 @@
 // function) by a call originating in plugin B, A and B need to actually
 // be the same engine instance, not just the same SourceHook version.
 //
+// This is a purely RUNTIME join -- no CMake link dependency between the two
+// plugins needed. g_pSourceHook starts out null; SH_ADD_HOOK/SH_ADD_INLINEHOOK/
+// SH_CALL/etc. are unsafe until SH_METAMOD_SHARED_BIND(...) actually runs
+// (typically as soon as the owning plugin's own ICoreInterface -- or
+// whatever the joining plugin uses to reach it -- becomes queryable via
+// g_SMAPI->MetaFactory; see JailBreak.cpp's TryBindSharedSourceHook() for a
+// worked example, including why it has to be retried both from Load() and
+// from IMetamodListener::OnPluginLoad(), since metamod doesn't guarantee any
+// particular plugin load order).
+//
+// For VIRTUAL/vtable hooks (SH_DECL_HOOK*), binding g_pSourceHook this way
+// is already the whole story -- SH_ADD_HOOK/SH_CALL go through
+// SH_GLOB_SHPTR's own ISourceHook interface directly, so an ordinary virtual
+// call correctly reaches the owning plugin's own compiled engine code the
+// moment the pointer is bound, regardless of which plugin's .so made the
+// call. For SH_DECL_INLINEHOOK*-style hooks, that alone used to NOT be
+// enough -- CInlineDispatcher<ThisClass,Ret,Args...> (sourcehook_inline.h)
+// used to keep its own hook table as `inline static` DATA MEMBERS, private
+// to whichever .so instantiated that exact template, entirely bypassing
+// SH_GLOB_SHPTR. That's fixed now: CInlineDispatcher's storage (and
+// CInlineHookAddressGuard's) is fetched via
+// ISourceHook::GetOrCreateInlineDispatcherStorage -- an ordinary virtual
+// call through this SAME g_pSourceHook -- so binding it here is sufficient
+// for both hook styles today. See ISourceHook::GetOrCreateInlineDispatcherStorage's
+// own comment (sourcehook.h) for the full reasoning, and e.g.
+// JailBreak/src/hooks/Hooks.h's own comment on TerminateRoundHook for the
+// one remaining caveat that mechanism has (a shared hook's declared
+// signature must be built-in-typed/type-erased, not reference any
+// per-plugin-namespaced schema type, or the two plugins' own mangled type
+// names -- what the registry is keyed by -- won't actually match).
+//
 //   #include <ISmmPlugin.h>
 //   #include "sourcehook_metamod_shared.h"
 //
@@ -31,57 +62,39 @@
 //       PLUGIN_SAVEVARS();
 //       SH_METAMOD_SHARED_DECLARE(id);   // <-- right after, same spot as PLUGIN_SAVEVARS()
 //       ...
+//       TryBindSharedEngine();           // does SH_METAMOD_SHARED_BIND(...) once reachable
 //   }
 //
-//   // Later, once you've actually obtained the owning plugin's
-//   // SourceHook::ISourceHook* (however that plugin exposes it -- e.g. a
-//   // CoreAPI accessor, looked up via g_SMAPI->MetaFactory once that
-//   // plugin has actually loaded):
-//   SH_METAMOD_SHARED_BIND(theOwningPluginsPointer);
-//
-//   // SH_ADD_HOOK/SH_ADD_MANUALHOOK/SH_ADD_INLINEHOOK/SH_CALL/
-//   // SH_GET_INLINEHOOK_ORIGINAL are only safe to use AFTER this --
-//   // SH_GLOB_SHPTR is null until SH_METAMOD_SHARED_BIND actually runs.
-//
 // The owning plugin itself keeps using sourcehook_metamod_override.h
-// completely unchanged -- it never needs to know anyone else is joining
-// it, and nothing here requires the owner to load before or after any
-// particular joiner (SH_METAMOD_SHARED_BIND just needs to run at some
-// point before this plugin's own first SH_ADD_*HOOK call; how a joiner
-// discovers "the owner has loaded, here's its pointer" -- e.g. an
-// immediate lookup attempt plus an IMetamodListener::OnPluginLoad retry,
-// to work regardless of which of the two plugins metamod happens to load
-// first -- is entirely up to the joiner, this header doesn't care).
+// completely unchanged -- it doesn't need to know anyone is joining it.
 
 #ifndef __SOURCEHOOK_METAMOD_SHARED_H__
 #define __SOURCEHOOK_METAMOD_SHARED_H__
 
-// Bare, not "sourcehook/sourcehook_impl.h" -- see
-// sourcehook_metamod_override.h's own identical comment on this include for
-// why (this file lives in the same include/sourcehook/ directory, so a bare
-// include resolves to our own sibling file with no ambiguity against
-// metamod-source's own ISmmPlugin.h-adjacent copy).
-#include "sourcehook_impl.h"
+// Bare, not "sourcehook/sourcehook.h" -- see sourcehook_metamod_override.h's
+// own identical comment on this include for why (this file lives in the
+// same include/sourcehook/ directory, so a bare include resolves to our own
+// sibling file with no ambiguity against metamod-source's own
+// ISmmPlugin.h-adjacent copy).
+#include "sourcehook.h"
 
-inline SourceHook::ISourceHook *g_pSharedSourceHook = nullptr;
+inline SourceHook::ISourceHook *g_pSourceHook = nullptr;
 inline SourceHook::Plugin g_iSharedSourceHookPluginId = 0;
 
 #undef SH_GLOB_SHPTR
-#define SH_GLOB_SHPTR g_pSharedSourceHook
+#define SH_GLOB_SHPTR g_pSourceHook
 #undef SH_GLOB_PLUGPTR
 #define SH_GLOB_PLUGPTR g_iSharedSourceHookPluginId
 
 // Call right after PLUGIN_SAVEVARS() in Load(), same spirit/placement as
-// SH_METAMOD_OVERRIDE_SAVEVARS(id) -- see the usage example above. Only sets
-// this plugin's own id (mirrors what PLUGIN_SAVEVARS() does for g_PLID);
-// SH_GLOB_SHPTR itself stays null until SH_METAMOD_SHARED_BIND actually
-// runs.
+// SH_METAMOD_OVERRIDE_SAVEVARS(id) -- see the usage example above.
 #define SH_METAMOD_SHARED_DECLARE(id) \
 	g_iSharedSourceHookPluginId = static_cast<SourceHook::Plugin>(id)
 
-// ptr: the owning plugin's SourceHook::ISourceHook*. Safe to call more than
-// once (e.g. a retry loop) -- always just overwrites with the latest value.
+// Call once the owning plugin's ISourceHook* is actually in hand (e.g. via
+// its own ICoreInterface accessor). Every SH_ADD_HOOK/SH_ADD_INLINEHOOK/
+// SH_CALL/etc. before this has run is unsafe (SH_GLOB_SHPTR is still null).
 #define SH_METAMOD_SHARED_BIND(ptr) \
-	(g_pSharedSourceHook = (ptr))
+	g_pSourceHook = (ptr)
 
 #endif //__SOURCEHOOK_METAMOD_SHARED_H__

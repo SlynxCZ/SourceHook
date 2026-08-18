@@ -160,7 +160,12 @@ namespace
 bool TestInlineHook(std::string &error)
 {
 	void *addr = reinterpret_cast<void *>(&TargetAdd);
-	auto &guard = SourceHook::Impl::CInlineHookAddressGuard::Get();
+	// SharedInlineHookAddressGuard(g_SHPtr), not CInlineHookAddressGuard::Get()
+	// directly -- production code (CInlineDispatcher::GetOrCreate) goes
+	// through the former now (see its own comment in sourcehook_inline.h),
+	// so asserting against the latter would silently watch an instance
+	// nothing actually touches any more.
+	auto &guard = SourceHook::Impl::SharedInlineHookAddressGuard(g_SHPtr);
 	std::size_t baseline = guard.TargetCount();
 
 	// Plugin A hooks Pre.

@@ -174,6 +174,48 @@ namespace SourceHook
 			~CInlineFrameGuard() { InlineCallStack().pop_back(); }
 		};
 
+		// The one shared instance production code (CInlineDispatcher::
+		// GetOrCreate below) and test/testinlinehook.cpp both go through --
+		// NOT CInlineHookAddressGuard::Get() (see that class' own header
+		// comment for what it does): that free-standing accessor returns a
+		// plain per-.so global (defined in sourcehook_impl_cinline.cpp, a
+		// vendor .cpp compiled once into the static sourcehook.a and copied
+		// into each plugin's own .so -- it can't see any particular
+		// plugin's own SH_GLOB_SHPTR override, so it could never be made to
+		// resolve to a SHARED instance the way this header-only function
+		// can). Routed through ISourceHook::GetOrCreateInlineDispatcherStorage
+		// (see its own comment) under a single fixed key: unlike
+		// CInlineDispatcher's own per-(ThisClass,Ret,Args...) sharing, the
+		// address guard's whole job is catching an incompatible collision
+		// ACROSS different Dispatcher types on the same address, so there is
+		// only ever one of these per engine instance, not one per type.
+		//
+		// `engine` is an explicit PARAMETER here, not a bare SH_GLOB_SHPTR
+		// reference inside this function's own body -- deliberately: this
+		// header is `#ifndef`-guarded, so its text (including any literal
+		// SH_GLOB_SHPTR token baked directly into a function body) is only
+		// ever preprocessed ONCE per translation unit, at whichever
+		// SH_GLOB_SHPTR expansion happened to be active the FIRST time
+		// something pulled this header in -- which is NOT reliably after a
+		// plugin's own sourcehook_metamod_override.h/_shared.h override has
+		// already run (a different header, possibly included earlier via
+		// some unrelated chain, could pull this one in first, silently
+		// freezing in the WRONG engine for that entire TU). Every actual
+		// caller (SH_ADD_INLINEHOOK/SH_CALL/SH_GET_INLINEHOOK_ORIGINAL/
+		// SH_REMOVE_INLINEHOOK, below) is a MACRO instead, so SH_GLOB_SHPTR
+		// is re-expanded fresh, textually, at each individual call site in
+		// the CONSUMING plugin's own code -- exactly like every other
+		// SH_GLOB_SHPTR-dependent macro in this codebase (SH_IFACEPTR,
+		// RETURN_SH, ...) already relies on -- and threaded through from
+		// there as an ordinary function argument.
+		inline CInlineHookAddressGuard &SharedInlineHookAddressGuard(SourceHook::ISourceHook *engine)
+		{
+			void *blob = engine->GetOrCreateInlineDispatcherStorage(
+				"SourceHook::Impl::CInlineHookAddressGuard",
+				[]() -> void * { return new CInlineHookAddressGuard(); });
+			return *static_cast<CInlineHookAddressGuard *>(blob);
+		}
+
 		// Fixed pool of distinct, individually-addressable trampoline
 		// instantiations per (ThisClass, Ret, Args...) shape. Each hooked
 		// address claims exactly one slot for the lifetime of its dispatcher;
@@ -281,27 +323,27 @@ namespace SourceHook
 			// already owned by an incompatible declared signature, the slot
 			// pool for this signature is exhausted, or safetyhook failed to
 			// create the detour.
-			static CInlineDispatcher *GetOrCreate(void *addr)
+			static CInlineDispatcher *GetOrCreate(SourceHook::ISourceHook *engine, void *addr)
 			{
-				std::lock_guard<std::mutex> lock(Map_Mutex());
+				SharedState &state = State(engine);
+				std::lock_guard<std::mutex> lock(state.mutex);
 
-				auto &map = Map();
-				auto it = map.find(addr);
-				if (it != map.end())
+				auto it = state.map.find(addr);
+				if (it != state.map.end())
 					return it->second;
 
-				if (!CInlineHookAddressGuard::Get().Claim(addr, typeid(CInlineDispatcher)))
+				if (!SharedInlineHookAddressGuard(engine).Claim(addr, typeid(CInlineDispatcher)))
 					return nullptr;
 
 				auto *disp = new CInlineDispatcher();
 				if (!disp->Install(addr))
 				{
-					CInlineHookAddressGuard::Get().Release(addr);
+					SharedInlineHookAddressGuard(engine).Release(addr);
 					delete disp;
 					return nullptr;
 				}
 
-				map.emplace(addr, disp);
+				state.map.emplace(addr, disp);
 				return disp;
 			}
 
@@ -310,12 +352,12 @@ namespace SourceHook
 			// hooked at `addr` for this declared signature. That's the
 			// correct answer for SH_CALL too: if nothing's hooked there, the
 			// bytes at `addr` already *are* the untouched original.
-			static CInlineDispatcher *Find(void *addr)
+			static CInlineDispatcher *Find(SourceHook::ISourceHook *engine, void *addr)
 			{
-				std::lock_guard<std::mutex> lock(Map_Mutex());
-				auto &map = Map();
-				auto it = map.find(addr);
-				return it != map.end() ? it->second : nullptr;
+				SharedState &state = State(engine);
+				std::lock_guard<std::mutex> lock(state.mutex);
+				auto it = state.map.find(addr);
+				return it != state.map.end() ? it->second : nullptr;
 			}
 
 			int AddHook(Handler handler, bool post)
@@ -353,12 +395,12 @@ namespace SourceHook
 			// passthrough hop + a small heap object per distinct address ever
 			// inline-hooked, for the life of the process -- bounded by
 			// distinct hooked addresses, not by hook add/remove churn.
-			static bool RemoveHook(void *addr, Handler handler, bool post)
+			static bool RemoveHook(SourceHook::ISourceHook *engine, void *addr, Handler handler, bool post)
 			{
-				std::lock_guard<std::mutex> lock(Map_Mutex());
-				auto &map = Map();
-				auto it = map.find(addr);
-				if (it == map.end())
+				SharedState &state = State(engine);
+				std::lock_guard<std::mutex> lock(state.mutex);
+				auto it = state.map.find(addr);
+				if (it == state.map.end())
 					return false;
 
 				CInlineDispatcher *disp = it->second;
@@ -382,36 +424,72 @@ namespace SourceHook
 
 			CInlineDispatcher() = default;
 
-			// s_Map/s_Map_Mutex/s_SlotTable below are `inline static` DATA
-			// MEMBERS (C++17), not function-local statics -- deliberately.
-			// A plugin build commonly compiles with -fno-threadsafe-statics
-			// (this repo's own AMBuildScript does, matching
-			// InventoryManager_mm_es's own), which removes the compiler-
-			// generated guard variable that would otherwise make a
-			// function-local static's first-use initialization safe against
-			// two threads racing to call Map()/Map_Mutex() for the very
-			// first time concurrently -- without it, the FIRST ever
-			// concurrent SH_ADD_INLINEHOOK/SH_CALL/etc. calls on two
-			// threads could race to construct the same std::mutex or
-			// std::unordered_map object twice, corrupting it before it's
-			// ever used (this is exactly the kind of bug that reproduces in
-			// an optimized/AMBuild release build but not a CMake dev build
-			// with default, standard-mandated thread-safe statics). A
-			// static DATA member instead gets ordinary dynamic
-			// initialization once, at library-load time, before any
-			// application thread could possibly reach it -- there's no
-			// "first concurrent call" race left to have. One instance per
-			// distinct (ThisClass, Ret, Args...) instantiation, same as
-			// before.
-			static std::unordered_map<void *, CInlineDispatcher *> &Map()
+			// The hook table (map) + its mutex, bundled as one blob so a
+			// single GetOrCreateInlineDispatcherStorage() call (State(),
+			// below) covers both. NOT owned directly by this Dispatcher
+			// instantiation any more -- see State()'s own comment for why.
+			struct SharedState
 			{
-				return s_Map;
+				std::unordered_map<void *, CInlineDispatcher *> map;
+				std::mutex mutex;
+			};
+
+			// s_TypeKey/s_SlotTable below are `inline static` DATA MEMBERS
+			// (C++17), not function-local statics -- deliberately. A plugin
+			// build commonly compiles with -fno-threadsafe-statics (this
+			// repo's own AMBuildScript does, matching InventoryManager_mm_es's
+			// own), which removes the compiler-generated guard variable that
+			// would otherwise make a function-local static's first-use
+			// initialization safe against two threads racing to call e.g.
+			// State()/SlotTable() for the very first time concurrently --
+			// without it, the FIRST ever concurrent SH_ADD_INLINEHOOK/
+			// SH_CALL/etc. calls on two threads could race to construct the
+			// same object twice, corrupting it before it's ever used (this is
+			// exactly the kind of bug that reproduces in an optimized/AMBuild
+			// release build but not a CMake dev build with default,
+			// standard-mandated thread-safe statics). A static DATA member
+			// instead gets ordinary dynamic initialization once, at
+			// library-load time, before any application thread could
+			// possibly reach it -- there's no "first concurrent call" race
+			// left to have. One instance per distinct (ThisClass, Ret,
+			// Args...) instantiation, same as before.
+			//
+			// State() itself no longer owns SharedState directly (the actual
+			// map/mutex used to be s_Map/s_Map_Mutex, `inline static` data
+			// members right here) -- it's now fetched via
+			// ISourceHook::GetOrCreateInlineDispatcherStorage, keyed by this
+			// Dispatcher's own mangled type name (s_TypeKey), which is
+			// identical across independently-compiled .so's for identical
+			// template arguments. That single extra indirection is what
+			// makes two different PLUGINS' own (separately compiled, `new`'d
+			// on first use by whichever one asks first) CInlineDispatcher
+			// static methods actually operate on the SAME underlying
+			// map/mutex/dispatcher objects whenever their SH_GLOB_SHPTR is
+			// bound to the same engine instance (sourcehook_metamod_shared.h)
+			// -- see ISourceHook::GetOrCreateInlineDispatcherStorage's own
+			// comment for the full reasoning. Still exactly one SharedState
+			// per distinct (ThisClass, Ret, Args...) shape, same as before --
+			// just possibly reached from more than one .so now.
+			//
+			// `engine` is a PARAMETER, not SH_GLOB_SHPTR referenced directly
+			// here -- see SharedInlineHookAddressGuard's own comment (above)
+			// for why: this header's text is only preprocessed once per TU,
+			// so a literal SH_GLOB_SHPTR token baked into this body would
+			// freeze at whatever it expanded to the FIRST time some include
+			// chain pulled this header in, which isn't reliably correct.
+			// GetOrCreate/Find/RemoveHook receive `engine` from their own
+			// callers, which ultimately trace back to a MACRO (SH_ADD_INLINEHOOK
+			// et al., below) re-expanding SH_GLOB_SHPTR fresh at the actual
+			// plugin call site.
+			static SharedState &State(SourceHook::ISourceHook *engine)
+			{
+				void *blob = engine->GetOrCreateInlineDispatcherStorage(s_TypeKey.c_str(), &CreateSharedState);
+				return *static_cast<SharedState *>(blob);
 			}
 
-			static std::mutex &Map_Mutex()
-			{
-				return s_Map_Mutex;
-			}
+			static void *CreateSharedState() { return new SharedState(); }
+
+			inline static const std::string s_TypeKey = typeid(CInlineDispatcher).name();
 
 			static auto &SlotTable()
 			{
@@ -427,8 +505,6 @@ namespace SourceHook
 				}(std::make_index_sequence<kMaxConcurrentTargets>{});
 			}
 
-			inline static std::unordered_map<void *, CInlineDispatcher *> s_Map;
-			inline static std::mutex s_Map_Mutex;
 			inline static decltype(ComputeSlotTable()) s_SlotTable = ComputeSlotTable();
 
 			bool Install(void *addr)
@@ -675,18 +751,18 @@ namespace SourceHook
 		};
 
 		template <typename Dispatcher>
-		int AddInlineHook(void *addr, typename Dispatcher::Handler handler, bool post)
+		int AddInlineHook(SourceHook::ISourceHook *engine, void *addr, typename Dispatcher::Handler handler, bool post)
 		{
-			Dispatcher *disp = Dispatcher::GetOrCreate(addr);
+			Dispatcher *disp = Dispatcher::GetOrCreate(engine, addr);
 			if (!disp)
 				return 0;
 			return disp->AddHook(handler, post);
 		}
 
 		template <typename Dispatcher>
-		bool RemoveInlineHook(void *addr, typename Dispatcher::Handler handler, bool post)
+		bool RemoveInlineHook(SourceHook::ISourceHook *engine, void *addr, typename Dispatcher::Handler handler, bool post)
 		{
-			return Dispatcher::RemoveHook(addr, handler, post);
+			return Dispatcher::RemoveHook(engine, addr, handler, post);
 		}
 
 		// What SH_CALL(hookname, targetAddr[, thisptr]) returns for an
@@ -699,12 +775,13 @@ namespace SourceHook
 		class InlineExecutable
 		{
 		public:
-			InlineExecutable(void *addr, ThisClass *pThis) : m_Addr(addr), m_This(pThis) { }
+			InlineExecutable(SourceHook::ISourceHook *engine, void *addr, ThisClass *pThis)
+				: m_Engine(engine), m_Addr(addr), m_This(pThis) { }
 
 			Ret operator()(Args... args) const
 			{
 				using Dispatcher = CInlineDispatcher<ThisClass, Ret, Args...>;
-				if (Dispatcher *disp = Dispatcher::Find(m_Addr))
+				if (Dispatcher *disp = Dispatcher::Find(m_Engine, m_Addr))
 					return disp->CallOriginal(m_This, args...);
 
 				// Nobody's hooked this address (for this signature) at all
@@ -718,6 +795,7 @@ namespace SourceHook
 			}
 
 		private:
+			SourceHook::ISourceHook *m_Engine;
 			void *m_Addr;
 			ThisClass *m_This;
 		};
@@ -757,11 +835,18 @@ namespace SourceHook
 		struct InlineOriginalTrampoline
 		{
 			static inline void *s_Addr = nullptr;
+			// Set alongside s_Addr by GetInlineHookOriginal() -- see its own
+			// comment for why this can't just reference SH_GLOB_SHPTR
+			// directly here instead (Fn() below is a genuine, capture-free
+			// fn ptr handed out to arbitrary external callers, so it has no
+			// "current call site" of its own to re-resolve SH_GLOB_SHPTR
+			// from even in principle).
+			static inline SourceHook::ISourceHook *s_Engine = nullptr;
 
 			static Ret SHINT_INLINE_CALLCONV Fn(ThisClass *pThis, Args... args)
 			{
 				using Dispatcher = CInlineDispatcher<ThisClass, Ret, Args...>;
-				if (Dispatcher *disp = Dispatcher::Find(s_Addr))
+				if (Dispatcher *disp = Dispatcher::Find(s_Engine, s_Addr))
 					return disp->CallOriginal(pThis, args...);
 
 				using RawFn = typename InlineRawFn<ThisClass, Ret, Args...>::Type;
@@ -775,11 +860,12 @@ namespace SourceHook
 		struct InlineOriginalTrampoline<HookTag, void, Ret, Args...>
 		{
 			static inline void *s_Addr = nullptr;
+			static inline SourceHook::ISourceHook *s_Engine = nullptr;
 
 			static Ret SHINT_INLINE_CALLCONV Fn(Args... args)
 			{
 				using Dispatcher = CInlineDispatcher<void, Ret, Args...>;
-				if (Dispatcher *disp = Dispatcher::Find(s_Addr))
+				if (Dispatcher *disp = Dispatcher::Find(s_Engine, s_Addr))
 					return disp->CallOriginal(nullptr, args...);
 
 				using RawFn = typename InlineRawFn<void, Ret, Args...>::Type;
@@ -792,9 +878,10 @@ namespace SourceHook
 		// fn ptr of that hook's own RawFn type, permanently wired to replay
 		// a lookup against `addr`.
 		template <typename HookTag>
-		typename HookTag::Dispatcher::RawFn GetInlineHookOriginal(HookTag, void *addr)
+		typename HookTag::Dispatcher::RawFn GetInlineHookOriginal(SourceHook::ISourceHook *engine, HookTag, void *addr)
 		{
 			HookTag::OriginalTrampoline::s_Addr = addr;
+			HookTag::OriginalTrampoline::s_Engine = engine;
 			return &HookTag::OriginalTrampoline::Fn;
 		}
 
@@ -804,12 +891,12 @@ namespace SourceHook
 		// nested names, so SH_CALL doesn't need the caller to spell out
 		// ThisClass/Ret/Args... by hand.
 		template <typename HookTag, typename ThisClass>
-		typename HookTag::Callable MakeInlineCallable(HookTag, void *addr, ThisClass *pThis)
+		typename HookTag::Callable MakeInlineCallable(SourceHook::ISourceHook *engine, HookTag, void *addr, ThisClass *pThis)
 		{
 			static_assert(std::is_same_v<ThisClass, typename HookTag::ThisClassT>,
 				"SH_CALL(hookname, targetAddr, thisptr): thisptr's type doesn't match "
 				"the thisclass this hook was declared with.");
-			return typename HookTag::Callable(addr, pThis);
+			return typename HookTag::Callable(engine, addr, pThis);
 		}
 
 		// thisclass == void overload: SH_CALL(hookname, targetAddr), no this
@@ -821,13 +908,13 @@ namespace SourceHook
 		// which hook style it's looking at, same spirit as SH_IFACEPTR/
 		// RETURN_SH auto-detecting via the inline call-frame stack.
 		template <typename HookTag>
-		typename HookTag::Callable MakeInlineCallable(HookTag, void *addr)
+		typename HookTag::Callable MakeInlineCallable(SourceHook::ISourceHook *engine, HookTag, void *addr)
 		{
 			static_assert(std::is_void_v<typename HookTag::ThisClassT>,
 				"SH_CALL(hookname, targetAddr) with only two arguments is for a hook "
 				"declared with thisclass = void; pass the this pointer as a third "
 				"argument for a non-void thisclass: SH_CALL(hookname, targetAddr, thisptr).");
-			return typename HookTag::Callable(addr, nullptr);
+			return typename HookTag::Callable(engine, addr, nullptr);
 		}
 	}
 }
@@ -839,9 +926,9 @@ namespace SourceHook
 // HookTag type) -- picked by ordinary C++ overload resolution on the actual
 // argument types, not by anything the macro itself has to decide.
 template <typename HookTag>
-typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook::ISourceHook *)
+typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook::ISourceHook *shptr)
 {
-	return SourceHook::Impl::MakeInlineCallable(tag, addr);
+	return SourceHook::Impl::MakeInlineCallable(shptr, tag, addr);
 }
 
 // SHINT_INLINE_IFACEPTR(type): `this` of the function currently being inline-hooked,
@@ -1057,10 +1144,10 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 // not just a type -- see generate/sourcehook_inline_decl.h) so SH_CALL can
 // also take it as an argument; decltype() gets back to its Tag type here.
 #define SH_ADD_INLINEHOOK(hookname, targetAddr, handler, post) \
-	::SourceHook::Impl::AddInlineHook<decltype(SourceHookInlineDecl::hookname)::Dispatcher>((targetAddr), (handler), (post))
+	::SourceHook::Impl::AddInlineHook<decltype(SourceHookInlineDecl::hookname)::Dispatcher>(SH_GLOB_SHPTR, (targetAddr), (handler), (post))
 
 #define SH_REMOVE_INLINEHOOK(hookname, targetAddr, handler, post) \
-	::SourceHook::Impl::RemoveInlineHook<decltype(SourceHookInlineDecl::hookname)::Dispatcher>((targetAddr), (handler), (post))
+	::SourceHook::Impl::RemoveInlineHook<decltype(SourceHookInlineDecl::hookname)::Dispatcher>(SH_GLOB_SHPTR, (targetAddr), (handler), (post))
 
 // SH_CALL(hookname, targetAddr) / SH_CALL(hookname, targetAddr, thisptr):
 // call the real original for an inline-hooked target directly, bypassing
@@ -1072,7 +1159,7 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 // second argument's type (see the SH_CALL2 overload above) -- same "one
 // macro name, auto-detects" spirit as SH_IFACEPTR/RETURN_SH.
 #define SH_CALL_INLINE3(hookname, targetAddr, thisptr) \
-	::SourceHook::Impl::MakeInlineCallable(SourceHookInlineDecl::hookname, (targetAddr), (thisptr))
+	::SourceHook::Impl::MakeInlineCallable(SH_GLOB_SHPTR, SourceHookInlineDecl::hookname, (targetAddr), (thisptr))
 
 // SH_GET_INLINEHOOK_ORIGINAL(hookname, targetAddr): returns a plain,
 // capture-free C function pointer -- of exactly `hookname`'s own declared
@@ -1089,6 +1176,6 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 // this hookname is ALSO used normally via SH_ADD_INLINEHOOK/SH_CALL; nothing
 // about using one precludes the other.
 #define SH_GET_INLINEHOOK_ORIGINAL(hookname, targetAddr) \
-	::SourceHook::Impl::GetInlineHookOriginal(SourceHookInlineDecl::hookname, (targetAddr))
+	::SourceHook::Impl::GetInlineHookOriginal(SH_GLOB_SHPTR, SourceHookInlineDecl::hookname, (targetAddr))
 
 #endif //__SOURCEHOOK_INLINE_H__

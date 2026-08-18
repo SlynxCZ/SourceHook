@@ -18,6 +18,9 @@
 #include "sh_vector.h"
 #include "sh_tinyhash.h"
 #include "sh_stack.h"
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 /*
 
@@ -451,6 +454,18 @@ namespace SourceHook
 			List<PendingUnload *> m_PendingUnloads;
 			DebugLogFunc m_LogFunc;
 
+			// Backs GetOrCreateInlineDispatcherStorage() (see ISourceHook's
+			// own comment on it) -- a plain member, not per-.so static state
+			// like everything sourcehook_inline.h otherwise owns, so it
+			// naturally lives with (and is shared exactly as widely as) this
+			// specific CSourceHookImpl OBJECT, however many plugins' own
+			// SH_GLOB_SHPTR happen to be bound at it. Never erased/shrunk --
+			// same permanent-for-the-process-lifetime contract as the blobs
+			// stored in it (CInlineDispatcher's own SharedState, and
+			// CInlineHookAddressGuard) already have on their own.
+			std::mutex m_InlineDispatcherStorageMutex;
+			std::unordered_map<std::string, void *> m_InlineDispatcherStorage;
+
 			// Per-*calling thread*, not per-CSourceHookImpl-instance: the
 			// original single global (non-thread-local) m_ContextStack member
 			// was written for Source1's single game thread, and is genuinely
@@ -530,6 +545,21 @@ namespace SourceHook
 			void DoRecall() override;
 
 			void LogDebug(const char *pFormat, ...) override;
+
+			// Defined right here, not in sourcehook_impl.cpp -- trivial
+			// enough that there's no benefit to the usual out-of-line
+			// split, and it doesn't touch anything else in that file.
+			void *GetOrCreateInlineDispatcherStorage(const char *key, void *(*factory)()) override
+			{
+				std::lock_guard<std::mutex> lock(m_InlineDispatcherStorageMutex);
+				auto it = m_InlineDispatcherStorage.find(key);
+				if (it != m_InlineDispatcherStorage.end())
+					return it->second;
+
+				void *blob = factory();
+				m_InlineDispatcherStorage.emplace(key, blob);
+				return blob;
+			}
 
 			IHookContext *SetupHookLoop(IHookManagerInfo *hi, void *vfnptr, void *thisptr, void **origCallAddr, META_RES *statusPtr,
 				META_RES *prevResPtr, META_RES *curResPtr, const void *origRetPtr, void *overrideRetPtr) override;
