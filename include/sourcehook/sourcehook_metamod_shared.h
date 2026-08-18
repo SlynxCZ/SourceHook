@@ -78,8 +78,30 @@
 // ISmmPlugin.h-adjacent copy).
 #include "sourcehook.h"
 
-inline SourceHook::ISourceHook *g_pSourceHook = nullptr;
-inline SourceHook::Plugin g_iSharedSourceHookPluginId = 0;
+// hidden, deliberately -- see sourcehook_metamod_override.h's own identical
+// comment on this. Doubly important here: this header's g_pSourceHook is
+// the EXACT SAME bare, file-scope symbol name as override.h's own
+// g_pSourceHook (the two are never included in the same TU, so that's fine
+// within one .so) -- without hidden visibility, a build with
+// -fvisibility=default (this repo's default) exports both under that
+// identical name, so the owning plugin's Core.so (override.h) and every
+// joining plugin's own .so (this header) risk the dynamic linker
+// interposing their "separate" g_pSourceHook variables onto one shared
+// storage location purely by symbol-name coincidence -- accidentally
+// achieving the same end state SH_METAMOD_SHARED_BIND is supposed to set up
+// deliberately, but via undefined-behavior-adjacent symbol aliasing instead
+// of an explicit bind call, with no guarantee it holds across load order or
+// future SourceHook versions with different symbol sets.
+#if defined(__GNUC__) || defined(__clang__)
+#define SH_METAMOD_SHARED_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define SH_METAMOD_SHARED_HIDDEN
+#endif
+
+SH_METAMOD_SHARED_HIDDEN inline SourceHook::ISourceHook *g_pSourceHook = nullptr;
+SH_METAMOD_SHARED_HIDDEN inline SourceHook::Plugin g_iSharedSourceHookPluginId = 0;
+
+#undef SH_METAMOD_SHARED_HIDDEN
 
 #undef SH_GLOB_SHPTR
 #define SH_GLOB_SHPTR g_pSourceHook

@@ -75,6 +75,18 @@ target_include_directories(sourcehook PRIVATE
 
 target_compile_definitions(sourcehook PRIVATE ZYDIS_STATIC_BUILD)
 
+# Defense in depth, matching vendor/dynlibutils's own already-correct
+# practice: hides whatever this library's OWN .cpp-defined symbols (not the
+# header-defined `inline` globals in sourcehook_metamod_override.h/
+# sourcehook_metamod_shared.h -- those need the explicit per-symbol
+# __attribute__((visibility("hidden"))) they carry, since template code
+# instantiated inside a *consumer's* own TU inherits that TU's own
+# -fvisibility flag, not this target's) from a consuming .so's exported
+# dynamic symbol table. See sourcehook_metamod_override.h's own comment for
+# the concrete bug this whole-project -fvisibility=default (makefiles/
+# linux.base.cmake) otherwise causes across independently-loaded plugins.
+target_compile_options(sourcehook PRIVATE -fvisibility=hidden)
+
 set_target_properties(sourcehook PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )

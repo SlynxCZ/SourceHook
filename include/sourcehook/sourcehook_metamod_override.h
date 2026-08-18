@@ -74,9 +74,40 @@
 // (older) CSourceHookImpl instead of this fork's.
 #include "sourcehook_impl.h"
 
-inline SourceHook::Impl::CSourceHookImpl g_SourceHookImpl;
-inline SourceHook::ISourceHook *g_pSourceHook = &g_SourceHookImpl;
-inline SourceHook::Plugin g_iSourceHookPluginId = 0;
+// hidden, deliberately: these are `inline` (header-defined, COMDAT/weak)
+// globals at file scope with no namespace -- without an explicit hidden-
+// visibility attribute, a build compiled with -fvisibility=default (this
+// repo's own makefiles/linux.base.cmake sets exactly that, project-wide, via
+// CMAKE_CXX_FLAGS) exports them into each consuming .so's dynamic symbol
+// table under their bare, unmangled-by-namespace names. Any OTHER
+// independently-built .so that also happens to vendor this exact file (a
+// pinned-commit fork of this same repo, for instance) defines the identical
+// symbol names -- and metamod loads plugins via dlopen(..., RTLD_GLOBAL), so
+// the dynamic linker can/will interpose the second .so's "private" globals
+// onto whichever one loaded first, silently merging two supposedly-isolated
+// SourceHook engine instances into one. That's a real, observed bug: a
+// third-party plugin's own "private" g_SourceHookImpl ended up aliasing
+// this suite's own Core.so instance (shared, by design, with every other
+// FUNPLAY plugin via sourcehook_metamod_shared.h) purely because both sides
+// exported the same bare symbol name -- corrupting the third-party plugin's
+// own hook-manager bookkeeping (it saw an already-populated plugin/hook-id
+// space instead of a fresh one) and crashing on a subsequent, unrelated
+// vtable lookup. __attribute__((visibility("hidden"))) forces GCC/Clang to
+// keep the symbol local to whichever .so actually instantiates it,
+// regardless of the translation unit's own -fvisibility flag -- restoring
+// the "not shared with any other plugin" guarantee this header already
+// documents (see the file header comment above) but didn't actually enforce.
+#if defined(__GNUC__) || defined(__clang__)
+#define SH_METAMOD_OVERRIDE_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define SH_METAMOD_OVERRIDE_HIDDEN
+#endif
+
+SH_METAMOD_OVERRIDE_HIDDEN inline SourceHook::Impl::CSourceHookImpl g_SourceHookImpl;
+SH_METAMOD_OVERRIDE_HIDDEN inline SourceHook::ISourceHook *g_pSourceHook = &g_SourceHookImpl;
+SH_METAMOD_OVERRIDE_HIDDEN inline SourceHook::Plugin g_iSourceHookPluginId = 0;
+
+#undef SH_METAMOD_OVERRIDE_HIDDEN
 
 #undef SH_GLOB_SHPTR
 #define SH_GLOB_SHPTR g_pSourceHook
