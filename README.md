@@ -8,7 +8,7 @@ many plugins share one vtable hook.
 
 ## Build
 
-Two build systems, same split as [DynLibUtils](https://github.com/Kenzzer/DynLibUtils):
+Two build systems, same split as [DynLibUtils](https://github.com/SlynxCZ/DynLibUtils):
 
 - **AmBuild** (`configure.py` + `AMBuildScript`) — production builds.
   ```bash
