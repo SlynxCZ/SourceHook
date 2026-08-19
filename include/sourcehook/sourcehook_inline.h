@@ -155,10 +155,89 @@ namespace SourceHook
 		// directly or indirectly, ends up re-entering the *same* hooked
 		// function) just pushes a new frame, exactly like ISourceHook's own
 		// HookLoopInfo stack handles reentrancy for vtable hooks.
-		inline std::vector<CInlineCallFrame *> &InlineCallStack()
+		//
+		// ...and one stack per PROCESS, not per .so -- which is the whole
+		// point of the indirection below. Metamod dlopen()s every plugin
+		// with RTLD_NOW and *without* RTLD_GLOBAL (core/metamod_oslink.h's
+		// dlmount), so each plugin's .so gets its own private copy of this
+		// header's function-local statics; -fvisibility=default does not
+		// change that, local symbol scopes simply don't interpose on each
+		// other. A bare `static thread_local` here would therefore give
+		// every plugin its own frame stack -- while the DISPATCHER is
+		// deliberately SHARED across plugins (see State() and
+		// ISourceHook::GetOrCreateInlineDispatcherStorage below).
+		//
+		// Those two facts don't compose: RunChain() pushes its frame in
+		// whichever .so owns the trampoline slot for that address (the
+		// plugin that happened to hook it first), then calls handlers
+		// belonging to every plugin that joined. A joining plugin's handler
+		// would look at its own, permanently empty stack -- so SH_IFACEPTR /
+		// RETURN_SH / RETURN_SH_VALUE / SET_SH_RESULT / SH_RESULT_ORIG_RET /
+		// SH_RESULT_STATUS (all of which switch on InlineCallStack().empty(),
+		// at the bottom of this file) would silently take the *vtable* branch
+		// and read or write SH_GLOB_SHPTR's unrelated, stale hook-loop
+		// context instead: a garbage this-pointer, a dropped META_RES, a
+		// bogus orig-ret. Silent wrong answers, not an assert -- the
+		// `.empty()` test looks like a legitimate "am I in an inline hook"
+		// probe, and it is; it just used to probe the wrong .so's stack.
+		//
+		// So: the real storage stays a per-.so thread_local (it has to --
+		// there's no such thing as a shared-memory thread_local), but every
+		// .so routes through exactly ONE of them, chosen the same way
+		// State() chooses one SharedState. The first .so to ask the engine
+		// publishes a pointer to its own accessor; every other .so adopts
+		// it. Same engine (sourcehook_metamod_shared.h) => same stack.
+		inline std::vector<CInlineCallFrame *> &LocalInlineCallStack()
 		{
 			static thread_local std::vector<CInlineCallFrame *> s_Stack;
 			return s_Stack;
+		}
+
+		// What GetOrCreateInlineDispatcherStorage hands back for the key
+		// below: a pointer to the publishing .so's LocalInlineCallStack.
+		struct SharedInlineCallStack
+		{
+			std::vector<CInlineCallFrame *> &(*get)();
+		};
+
+		inline void *CreateSharedInlineCallStack()
+		{
+			return new SharedInlineCallStack{ &LocalInlineCallStack };
+		}
+
+		// Whichever accessor this .so has adopted. Starts out as its own,
+		// which is correct for the only window in which it can still be
+		// read: until this .so has run a single SH_ADD_INLINEHOOK it cannot
+		// have a handler registered on any dispatcher, so nothing can push
+		// or read a frame through it yet. BindInlineCallStack() (reached
+		// from State(), i.e. from every SH_ADD_INLINEHOOK /
+		// SH_REMOVE_INLINEHOOK / SH_CALL) swaps it for the shared one well
+		// before that stops being true.
+		//
+		// An `inline` variable with a constant initializer rather than a
+		// function-local static, for the same -fno-threadsafe-statics reason
+		// s_TypeKey/s_SlotTable are `inline static` DATA members -- see
+		// State()'s own comment. Plain (non-atomic) on purpose: it is only
+		// ever written during plugin load, always with the same value once
+		// the blob exists, and read on the game thread afterwards.
+		inline std::vector<CInlineCallFrame *> &(*g_pInlineCallStackGetter)() = &LocalInlineCallStack;
+
+		// Adopt the process-wide frame stack. Idempotent and cheap enough to
+		// sit on SH_ADD_INLINEHOOK/SH_REMOVE_INLINEHOOK/SH_CALL (one locked
+		// map lookup, same as State()'s own) -- deliberately NOT on the
+		// per-call RunChain() path, which never needs it: by the time a hook
+		// can fire, every .so that has a handler on it has already been
+		// through here.
+		inline void BindInlineCallStack(SourceHook::ISourceHook *engine)
+		{
+			void *blob = engine->GetOrCreateInlineDispatcherStorage(
+				"SourceHook::Impl::SharedInlineCallStack", &CreateSharedInlineCallStack);
+			g_pInlineCallStackGetter = static_cast<SharedInlineCallStack *>(blob)->get;
+		}
+
+		inline std::vector<CInlineCallFrame *> &InlineCallStack()
+		{
+			return g_pInlineCallStackGetter();
 		}
 
 		inline CInlineCallFrame *CurrentInlineFrame()
@@ -483,6 +562,15 @@ namespace SourceHook
 			// plugin call site.
 			static SharedState &State(SourceHook::ISourceHook *engine)
 			{
+				// Also this .so's adoption point for the process-wide
+				// inline-hook frame stack: every path that can end with one
+				// of THIS .so's handlers running (SH_ADD_INLINEHOOK), and
+				// every path that reads a frame (SH_CALL), comes through
+				// here first, always with the same `engine` the dispatcher
+				// itself is keyed on. See BindInlineCallStack's own comment
+				// for what goes wrong without it.
+				BindInlineCallStack(engine);
+
 				void *blob = engine->GetOrCreateInlineDispatcherStorage(s_TypeKey.c_str(), &CreateSharedState);
 				return *static_cast<SharedState *>(blob);
 			}
