@@ -235,6 +235,120 @@ namespace SourceHook
 			g_pInlineCallStackGetter = static_cast<SharedInlineCallStack *>(blob)->get;
 		}
 
+		// SH_ADD_INLINEHOOK hands back an id its caller is expected to keep
+		// and later pass to SH_REMOVE_HOOK_ID -- the same shape SH_ADD_HOOK/
+		// SH_ADD_MANUALHOOK already have, so a plugin stores one int per hook
+		// and never has to remember which hook *style* an id came from at the
+		// removal site. (SH_REMOVE_INLINEHOOK(hookname, addr, handler, post)
+		// stays as the by-handler form, for a caller that would rather not
+		// keep the id.)
+		//
+		// That single-macro removal only works if an inline id can never be
+		// mistaken for a vtable one, so the two come from disjoint ranges:
+		// vtable ids are indices into CHookIDManager's own vector, +1
+		// (sourcehook_impl_chookidman.cpp) -- dense from 1, and bounded in
+		// practice by how many hooks exist at once -- while inline ids start
+		// at kInlineHookIdBase. Nothing has to coordinate; the ranges simply
+		// can't meet.
+		inline constexpr int kInlineHookIdBase = 0x40000000;
+
+		inline bool IsInlineHookId(int hookid) { return hookid >= kInlineHookIdBase; }
+
+		// id -> whoever can remove it.
+		//
+		// Type-erased on purpose: an id on its own cannot name a
+		// CInlineDispatcher<ThisClass, Ret, Args...> instantiation, and
+		// RemoveInlineHookById() below is an ordinary non-template function
+		// (it has to be -- the SH_REMOVE_HOOK_ID macro has nothing but the
+		// id to work with). `remove` is a static member of the very
+		// instantiation `disp` points at, so calling it lands straight back
+		// in the right template body without this registry ever knowing the
+		// shape. Note that means a function pointer into whichever .so first
+		// hooked that address, exactly like the trampoline slot's own
+		// s_Owner already is -- see InlineTrampolineSlot.
+		struct InlineHookIdRegistry
+		{
+			struct Entry
+			{
+				void *disp = nullptr;
+				bool (*remove)(void *disp, int hookid) = nullptr;
+			};
+
+			std::mutex mutex;
+			int next_id = kInlineHookIdBase;
+			std::unordered_map<int, Entry> map;
+		};
+
+		inline void *CreateInlineHookIdRegistry() { return new InlineHookIdRegistry(); }
+
+		// One registry per ENGINE, reached exactly the way SharedState is
+		// (see State()) -- so two plugins bound to the same engine
+		// (sourcehook_metamod_shared.h) share one id space, and one of them
+		// can hand back an id the other allocated.
+		inline InlineHookIdRegistry &InlineIdRegistry(SourceHook::ISourceHook *engine)
+		{
+			void *blob = engine->GetOrCreateInlineDispatcherStorage(
+				"SourceHook::Impl::InlineHookIdRegistry", &CreateInlineHookIdRegistry);
+			return *static_cast<InlineHookIdRegistry *>(blob);
+		}
+
+		inline int AllocInlineHookId(SourceHook::ISourceHook *engine)
+		{
+			InlineHookIdRegistry &reg = InlineIdRegistry(engine);
+			std::lock_guard<std::mutex> lock(reg.mutex);
+			return reg.next_id++;
+		}
+
+		// Split from AllocInlineHookId so the mapping only becomes visible
+		// once the handler is genuinely in its dispatcher's list: a
+		// SH_REMOVE_HOOK_ID racing a just-allocated id then fails cleanly as
+		// an unknown id, instead of erasing the registry entry for a handler
+		// that hasn't been pushed yet and orphaning it forever.
+		inline void PublishInlineHookId(SourceHook::ISourceHook *engine, int hookid,
+			void *disp, bool (*remove)(void *, int))
+		{
+			InlineHookIdRegistry &reg = InlineIdRegistry(engine);
+			std::lock_guard<std::mutex> lock(reg.mutex);
+			reg.map[hookid] = InlineHookIdRegistry::Entry{ disp, remove };
+		}
+
+		// For the by-handler removal path (SH_REMOVE_INLINEHOOK): drops the
+		// id of the handler it just removed, so a later SH_REMOVE_HOOK_ID on
+		// that id correctly reports "no such hook" rather than finding a
+		// live entry.
+		inline void ForgetInlineHookId(SourceHook::ISourceHook *engine, int hookid)
+		{
+			if (!hookid)
+				return;
+
+			InlineHookIdRegistry &reg = InlineIdRegistry(engine);
+			std::lock_guard<std::mutex> lock(reg.mutex);
+			reg.map.erase(hookid);
+		}
+
+		// What SH_REMOVE_HOOK_ID resolves to for an inline id (see the
+		// bottom of this file). The registry lock is dropped before `remove`
+		// runs: that call takes the dispatcher's own m_Mutex, and no path
+		// anywhere takes those two in the opposite order, so there is no
+		// lock-ordering pair left to get wrong.
+		inline bool RemoveInlineHookById(SourceHook::ISourceHook *engine, int hookid)
+		{
+			InlineHookIdRegistry::Entry entry;
+			{
+				InlineHookIdRegistry &reg = InlineIdRegistry(engine);
+				std::lock_guard<std::mutex> lock(reg.mutex);
+
+				auto it = reg.map.find(hookid);
+				if (it == reg.map.end())
+					return false;
+
+				entry = it->second;
+				reg.map.erase(it);
+			}
+
+			return entry.remove(entry.disp, hookid);
+		}
+
 		inline std::vector<CInlineCallFrame *> &InlineCallStack()
 		{
 			return g_pInlineCallStackGetter();
@@ -439,11 +553,21 @@ namespace SourceHook
 				return it != state.map.end() ? it->second : nullptr;
 			}
 
-			int AddHook(Handler handler, bool post)
+			int AddHook(SourceHook::ISourceHook *engine, Handler handler, bool post)
 			{
-				std::lock_guard<std::mutex> lock(m_Mutex);
-				int id = m_NextId++;
-				(post ? m_Post : m_Pre).push_back(Entry{ id, handler });
+				// Engine-wide id, not a counter private to this dispatcher:
+				// SH_REMOVE_HOOK_ID has nothing but the number to go on, so
+				// it has to be unique across every inline hook on every
+				// address -- and distinguishable from a vtable id. See
+				// InlineHookIdRegistry.
+				int id = AllocInlineHookId(engine);
+
+				{
+					std::lock_guard<std::mutex> lock(m_Mutex);
+					(post ? m_Post : m_Pre).push_back(Entry{ id, handler });
+				}
+
+				PublishInlineHookId(engine, id, this, &RemoveHookByIdThunk);
 				return id;
 			}
 
@@ -483,7 +607,7 @@ namespace SourceHook
 					return false;
 
 				CInlineDispatcher *disp = it->second;
-				return disp->RemoveHookLocked(handler, post);
+				return disp->RemoveHookLocked(engine, handler, post);
 			}
 
 			std::size_t HandlerCount() const
@@ -704,16 +828,55 @@ namespace SourceHook
 				return result == -2 ? -1 : result;
 			}
 
-			bool RemoveHookLocked(Handler handler, bool post)
+			bool RemoveHookLocked(SourceHook::ISourceHook *engine, Handler handler, bool post)
+			{
+				int hookid = 0;
+
+				{
+					std::lock_guard<std::mutex> lock(m_Mutex);
+					auto &list = post ? m_Post : m_Pre;
+					for (auto it = list.begin(); it != list.end(); ++it)
+					{
+						if (it->handler == handler)
+						{
+							hookid = it->id;
+							list.erase(it);
+							break;
+						}
+					}
+				}
+
+				if (!hookid)
+					return false;
+
+				ForgetInlineHookId(engine, hookid);
+				return true;
+			}
+
+			// Type-erased entry point for InlineHookIdRegistry -- what turns
+			// a bare id back into a call on this exact instantiation. See
+			// RemoveInlineHookById().
+			static bool RemoveHookByIdThunk(void *disp, int hookid)
+			{
+				return static_cast<CInlineDispatcher *>(disp)->RemoveHookByIdLocked(hookid);
+			}
+
+			// Unlike RemoveHookLocked() an id says nothing about pre vs post,
+			// so both lists get searched. The registry entry is already gone
+			// by the time this runs (RemoveInlineHookById erases it first),
+			// so there is nothing to forget here.
+			bool RemoveHookByIdLocked(int hookid)
 			{
 				std::lock_guard<std::mutex> lock(m_Mutex);
-				auto &list = post ? m_Post : m_Pre;
-				for (auto it = list.begin(); it != list.end(); ++it)
+				for (auto *list : { &m_Pre, &m_Post })
 				{
-					if (it->handler == handler)
+					for (auto it = list->begin(); it != list->end(); ++it)
 					{
-						list.erase(it);
-						return true;
+						if (it->id == hookid)
+						{
+							list->erase(it);
+							return true;
+						}
 					}
 				}
 				return false;
@@ -832,7 +995,6 @@ namespace SourceHook
 			safetyhook::InlineHook m_Hook;
 			std::vector<std::uint8_t> m_InstalledBytes; // see HardUninstall()
 			int m_Slot = -1;
-			int m_NextId = 1;
 			std::vector<Entry> m_Pre;
 			std::vector<Entry> m_Post;
 			mutable std::mutex m_Mutex;
@@ -844,7 +1006,7 @@ namespace SourceHook
 			Dispatcher *disp = Dispatcher::GetOrCreate(engine, addr);
 			if (!disp)
 				return 0;
-			return disp->AddHook(handler, post);
+			return disp->AddHook(engine, handler, post);
 		}
 
 		template <typename Dispatcher>
@@ -1236,6 +1398,26 @@ typename HookTag::Callable SH_CALL2(HookTag tag, void *addr, void *, SourceHook:
 
 #define SH_REMOVE_INLINEHOOK(hookname, targetAddr, handler, post) \
 	::SourceHook::Impl::RemoveInlineHook<decltype(SourceHookInlineDecl::hookname)::Dispatcher>(SH_GLOB_SHPTR, (targetAddr), (handler), (post))
+
+// One removal macro for all three hook styles, in the same spirit as
+// SH_IFACEPTR/RETURN_SH/SH_CALL above: hand it whatever SH_ADD_HOOK,
+// SH_ADD_MANUALHOOK or SH_ADD_INLINEHOOK gave you and it goes to the right
+// place. Which one that is is decided by the id itself, not by the call
+// site -- inline ids live in their own disjoint range (kInlineHookIdBase,
+// see InlineHookIdRegistry) precisely so this test can exist, since the
+// engine-wide CHookIDManager that sourcehook.h's original definition looks
+// in only ever knows about vtable hooks. Without this override an inline id
+// silently landed in that lookup, where it either matched nothing or --
+// worse, both spaces used to start at 1 -- matched and removed somebody
+// else's vtable hook.
+//
+// SH_REMOVE_INLINEHOOK(hookname, targetAddr, handler, post) above is still
+// the by-handler alternative for a caller that would rather not keep the id.
+#undef SH_REMOVE_HOOK_ID
+#define SH_REMOVE_HOOK_ID(hookid) \
+	(::SourceHook::Impl::IsInlineHookId(hookid) \
+		? ::SourceHook::Impl::RemoveInlineHookById(SH_GLOB_SHPTR, (hookid)) \
+		: SH_GLOB_SHPTR->RemoveHookByID(hookid))
 
 // SH_CALL(hookname, targetAddr) / SH_CALL(hookname, targetAddr, thisptr):
 // call the real original for an inline-hooked target directly, bypassing

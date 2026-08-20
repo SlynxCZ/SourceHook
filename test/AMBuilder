@@ -59,6 +59,18 @@ for cxx in SHook.all_targets:
       'main_inline.cpp',
       'testinlinehook.cpp',
       os.path.join('..', 'src', 'core', 'sourcehook_impl_cinline.cpp'),
+      # The engine itself: inline hooks keep their shared state behind
+      # ISourceHook::GetOrCreateInlineDispatcherStorage, so the test needs a
+      # real CSourceHookImpl to point g_SHPtr at (see testinlinehook.cpp),
+      # not just the inline dispatch TU. The CMake build gets these by
+      # linking the whole `sourcehook` target. hookmangen stays out: that's
+      # vtable-hook JIT codegen, which nothing here touches (and which isn't
+      # built on Linux x86_64 anyway, see this repo's own CMakeLists.txt).
+      os.path.join('..', 'src', 'core', 'sourcehook.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_chookmaninfo.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_chookidman.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_cproto.cpp'),
+      os.path.join('..', 'src', 'core', 'sourcehook_impl_cvfnptr.cpp'),
     ]
     SHook.AddVendorSources(binary)
     SHook.AddPublicIncludes(binary)

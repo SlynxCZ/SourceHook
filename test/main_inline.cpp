@@ -21,6 +21,7 @@ bool TestInlineHookMetaMacros(std::string &error);
 bool TestInlineHookVoidDecl(std::string &error);
 bool TestInlineHookGetOriginal(std::string &error);
 bool TestInlineHookConcurrency(std::string &error);
+bool TestInlineHookRemoveById(std::string &error);
 
 int main()
 {
@@ -59,6 +60,13 @@ int main()
 		return 1;
 	}
 	std::cout << "TestInlineHookConcurrency passed" << std::endl;
+
+	if (!TestInlineHookRemoveById(error))
+	{
+		std::cout << "TestInlineHookRemoveById FAILED: " << error << std::endl;
+		return 1;
+	}
+	std::cout << "TestInlineHookRemoveById passed" << std::endl;
 
 	return 0;
 }

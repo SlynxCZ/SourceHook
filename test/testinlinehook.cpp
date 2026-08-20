@@ -28,16 +28,25 @@
 
 #include <string>
 
+#include "sourcehook/sourcehook_impl.h"
 #include "sourcehook/sourcehook_inline.h"
 
 // SH_IFACEPTR/RETURN_SH/RETURN_SH_VALUE/SET_SH_RESULT/SH_RESULT_ORIG_RET
 // (sourcehook_inline.h) always reference SH_GLOB_SHPTR (default: g_SHPtr) in
 // the compiled code for their vtable-hook fallback branch, even where that
 // branch is never actually *taken* at runtime -- this test only ever uses
-// inline hooks, so it's dead code here, but the symbol still has to exist
-// for the TU to compile. A real metamod:source plugin already gets this for
-// free from PLUGIN_EXPOSE(); a standalone tool/test needs its own stand-in.
-SourceHook::ISourceHook *g_SHPtr = nullptr;
+// inline hooks, so it's dead code here. A real metamod:source plugin gets
+// these two for free from PLUGIN_EXPOSE(); a standalone tool/test needs its
+// own stand-in.
+//
+// It has to be a REAL engine, not just a symbol that exists: inline hooks
+// keep their shared state (the per-address dispatcher map, the frame stack,
+// the hook-id registry) behind ISourceHook::GetOrCreateInlineDispatcherStorage
+// so that separately-loaded plugins bound to one engine share one set of it
+// -- so every SH_ADD_INLINEHOOK/SH_REMOVE_*/SH_CALL here makes a virtual
+// call on this pointer. A null g_SHPtr segfaults on the first one.
+static SourceHook::Impl::CSourceHookImpl g_SourceHookImpl;
+SourceHook::ISourceHook *g_SHPtr = &g_SourceHookImpl;
 SourceHook::Plugin g_PLID = 0;
 
 // -------------------- free function (thisclass = void) --------------------
@@ -629,6 +638,101 @@ bool TestInlineHookConcurrency(std::string &error)
 	// relative to the callers to prove anything, and the run above wasn't
 	// actually exercising the hooked path at all).
 	CHECK(g_ConcurrencyPreCalls.load() > 0, "Pre handler never ran during the concurrency test -- churn/caller timing didn't overlap at all");
+
+	return true;
+}
+
+// -------------------- SH_REMOVE_HOOK_ID --------------------
+//
+// The id SH_ADD_INLINEHOOK returns is meant to be usable the same way
+// SH_ADD_HOOK's is: keep the int, hand it to SH_REMOVE_HOOK_ID, never think
+// about which hook style it came from. That only holds because inline ids
+// come from a range no vtable id can reach (kInlineHookIdBase) and the macro
+// tests the id itself -- so this also pins down that an inline id can never
+// be mistaken for, and never removes, a vtable hook.
+
+SH_DECL_INLINEHOOK1(TestInlineRemoveById, void, int, int);
+
+namespace
+{
+	int g_RemoveByIdPreCalls = 0;
+	int g_RemoveByIdPostCalls = 0;
+
+	int __attribute__((noinline)) TargetRemoveById(int x)
+	{
+		volatile int y = x + 5;
+		asm volatile(
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			"nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\t"
+			::: "memory");
+		return y + 0;
+	}
+
+	int RemoveByIdPre(int)
+	{
+		++g_RemoveByIdPreCalls;
+		RETURN_SH_VALUE(SHRES_IGNORED, 0);
+	}
+
+	int RemoveByIdPost(int)
+	{
+		++g_RemoveByIdPostCalls;
+		RETURN_SH_VALUE(SHRES_IGNORED, 0);
+	}
+}
+
+bool TestInlineHookRemoveById(std::string &error)
+{
+	void *addr = reinterpret_cast<void *>(&TargetRemoveById);
+
+	int idPre = SH_ADD_INLINEHOOK(TestInlineRemoveById, addr, SH_STATIC(RemoveByIdPre), false);
+	CHECK(idPre != 0, "failed to register the Pre handler");
+	int idPost = SH_ADD_INLINEHOOK(TestInlineRemoveById, addr, SH_STATIC(RemoveByIdPost), true);
+	CHECK(idPost != 0, "failed to register the Post handler");
+
+	// Disjoint from the vtable id space, which is dense from 1 -- this is
+	// what lets one SH_REMOVE_HOOK_ID serve both.
+	CHECK(SourceHook::Impl::IsInlineHookId(idPre), "inline id was not allocated from the inline range");
+	CHECK(SourceHook::Impl::IsInlineHookId(idPost), "inline id was not allocated from the inline range");
+	CHECK(idPre != idPost, "two inline hooks got the same id");
+
+	g_RemoveByIdPreCalls = 0;
+	g_RemoveByIdPostCalls = 0;
+	CHECK(TargetRemoveById(1) == 6, "hooked call did not return the original's result");
+	CHECK(g_RemoveByIdPreCalls == 1 && g_RemoveByIdPostCalls == 1, "handlers did not run exactly once each");
+
+	// Removing the Pre by id must leave the Post alone -- an id names one
+	// specific handler, not "everything on this address".
+	CHECK(SH_REMOVE_HOOK_ID(idPre), "SH_REMOVE_HOOK_ID did not remove the Pre handler");
+
+	g_RemoveByIdPreCalls = 0;
+	g_RemoveByIdPostCalls = 0;
+	CHECK(TargetRemoveById(1) == 6, "call after removing Pre did not return the original's result");
+	CHECK(g_RemoveByIdPreCalls == 0, "removed Pre handler still ran");
+	CHECK(g_RemoveByIdPostCalls == 1, "removing Pre by id also removed the Post handler");
+
+	// Same id twice: the second attempt has nothing left to find.
+	CHECK(!SH_REMOVE_HOOK_ID(idPre), "removing an already-removed id reported success");
+
+	CHECK(SH_REMOVE_HOOK_ID(idPost), "SH_REMOVE_HOOK_ID did not remove the Post handler");
+
+	g_RemoveByIdPreCalls = 0;
+	g_RemoveByIdPostCalls = 0;
+	CHECK(TargetRemoveById(1) == 6, "call after removing both handlers did not return the original's result");
+	CHECK(g_RemoveByIdPreCalls == 0 && g_RemoveByIdPostCalls == 0, "a removed handler still ran");
+
+	// The by-handler form has to retire the id too, or a later
+	// SH_REMOVE_HOOK_ID on it would find a live registry entry for a handler
+	// that is already gone.
+	int idAgain = SH_ADD_INLINEHOOK(TestInlineRemoveById, addr, SH_STATIC(RemoveByIdPre), false);
+	CHECK(idAgain != 0, "failed to re-register the Pre handler");
+	CHECK(SH_REMOVE_INLINEHOOK(TestInlineRemoveById, addr, SH_STATIC(RemoveByIdPre), false),
+		"SH_REMOVE_INLINEHOOK failed to remove the re-registered Pre handler");
+	CHECK(!SH_REMOVE_HOOK_ID(idAgain), "id of a handler removed by handler was still live in the registry");
+
+	// A vtable-range id must still take the engine path and simply not exist
+	// there -- i.e. the new branch didn't swallow ordinary ids.
+	CHECK(!SH_REMOVE_HOOK_ID(1), "a vtable-range id did not go to the engine's own lookup");
 
 	return true;
 }

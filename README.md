@@ -134,7 +134,9 @@ to the right implementation — a handler body never has to say which kind of
 hook it's in. The **only** place the hook style is visible at all is
 `SH_DECL_*`/`SH_ADD_*`/`SH_REMOVE_*` (`SH_DECL_INLINEHOOK*`/
 `SH_ADD_INLINEHOOK`/`SH_REMOVE_INLINEHOOK` vs. `SH_DECL_HOOK*`/
-`SH_ADD_HOOK`/`SH_REMOVE_HOOK` etc.) — decl/add/remove, nothing else. The
+`SH_ADD_HOOK`/`SH_REMOVE_HOOK` etc.) — decl/add, plus the by-handler
+`SH_REMOVE_*` forms; removal *by id* is one macro for all three styles
+(`SH_REMOVE_HOOK_ID`, see "Inline hooks" below). The
 old `META_*`/`MRES_*` names are kept as plain aliases for existing plugin
 code — nothing about their behavior changed, only which name is preferred
 going forward. (`SH_INLINE_ORIG_CALLED()` is the one inline-only helper
@@ -173,10 +175,23 @@ void MyOtherDetour(int x)
 
 // targetAddr is whatever your own signature scan resolved -- SourceHook
 // doesn't do the scanning itself.
-SH_ADD_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false /* pre */);
+int hookId = SH_ADD_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false /* pre */);
 SH_ADD_INLINEHOOK(MyOtherHook, otherAddr, SH_MEMBER(this, &MyClass::MyOtherDetour), true /* post */);
+
+// Two ways to take it back out -- by the id you kept, or by naming the same
+// address/handler/post you registered with:
+SH_REMOVE_HOOK_ID(hookId);
 SH_REMOVE_INLINEHOOK(MyHook, targetAddr, SH_STATIC(MyDetour), false);
 ```
+
+`SH_REMOVE_HOOK_ID` is the **same** macro that removes typed and manual
+hooks — hand it whatever `SH_ADD_HOOK`/`SH_ADD_MANUALHOOK`/
+`SH_ADD_INLINEHOOK` returned and it goes to the right place, so a plugin
+stores one `int` per hook and never re-states the hook style at the removal
+site. The macro decides from the id itself: inline ids are allocated from a
+range no vtable id can reach (`kInlineHookIdBase`), since vtable ids are
+dense from 1. `SH_REMOVE_INLINEHOOK(hookname, targetAddr, handler, post)`
+stays available for a caller that would rather not keep the id.
 
 Any translation unit that includes `sourcehook/sourcehook.h` and uses these
 unified macros needs `SH_GLOB_SHPTR`/`SH_GLOB_PLUGPTR` (default:
