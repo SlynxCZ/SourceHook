@@ -701,7 +701,25 @@ namespace SourceHook
 
 			static void *CreateSharedState() { return new SharedState(); }
 
-			inline static const std::string s_TypeKey = typeid(CInlineDispatcher).name();
+			// typeid(CInlineDispatcher) lives in a static member FUNCTION
+			// rather than directly in s_TypeKey's initializer below -- the
+			// same shape s_SlotTable/ComputeSlotTable() already use, a few
+			// lines down. typeid() needs a complete type, and a *static* data member's
+			// initializer is not one of the complete-class contexts
+			// ([class.mem.general]: function bodies, default arguments,
+			// noexcept-specifiers and *default member initializers* -- the
+			// last of which means non-static members only). GCC and Clang
+			// let it slide because they don't instantiate the initializer
+			// until s_TypeKey is odr-used, by which point the class is long
+			// complete; MSVC completes it while the class is still being
+			// instantiated and rejects it outright (C2027) as soon as
+			// anything forces that instantiation from inside the class
+			// itself -- AddHook()'s &RemoveHookByIdThunk does exactly that.
+			// A function body is a complete-class context unconditionally,
+			// so this is well-defined on every compiler.
+			static std::string ComputeTypeKey() { return typeid(CInlineDispatcher).name(); }
+
+			inline static const std::string s_TypeKey = ComputeTypeKey();
 
 			static auto &SlotTable()
 			{
